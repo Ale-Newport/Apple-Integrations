@@ -142,7 +142,9 @@ final class AppModel {
             let infos = steps.map { step in
                 StepInfo(id: step.id, tool: step.tool, title: registry.descriptor(for: step.tool)?.title ?? step.tool.rawValue, state: .pending)
             }
-            messages[index].phase = .running(infos)
+            if case .running(let previous) = messages[index].phase {
+                messages[index].phase = .running(previous + infos)
+            } else { messages[index].phase = .running(infos) }
         case .stepStarted(_, let callID):
             update(step: callID, in: index) { $0.state = .running }
         case .stepFinished(_, let result):
@@ -195,6 +197,7 @@ final class AppModel {
     func clearConversation() {
         cancelAll()
         messages.removeAll()
+        Task { await environment.engine.clearSession("ui") }
     }
 
     // MARK: History

@@ -65,6 +65,8 @@ public struct ToolPlan: Sendable, Hashable {
     public var interpreter: String
     /// Parts of the command that were not understood or need more information; shown after the results.
     public var notes: [String]
+    /// Replan after observing this batch. Each batch must contain only reads or one write.
+    public var continues = false
 
     public init(steps: [ToolCall], language: Language, interpreter: String, notes: [String] = []) {
         self.steps = steps

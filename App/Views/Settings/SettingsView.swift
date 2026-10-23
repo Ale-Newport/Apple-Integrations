@@ -1,4 +1,5 @@
 import JarvisCore
+import JarvisInterpreter
 import SwiftUI
 
 struct SettingsView: View {
@@ -11,6 +12,9 @@ struct SettingsView: View {
             GeneralSettingsView()
                 .tabItem { Label(model.t("General", "General"), systemImage: "gearshape") }
                 .tag("general")
+            IntelligenceSettingsView()
+                .tabItem { Label(model.t("Intelligence", "Inteligencia"), systemImage: "sparkles") }
+                .tag("intelligence")
             PermissionsSettingsView()
                 .tabItem { Label(model.t("Permissions", "Permisos"), systemImage: "lock.shield") }
                 .tag("permissions")
@@ -104,5 +108,88 @@ struct GeneralSettingsView: View {
             launchError = model.t("Could not change this: \(error.localizedDescription)", "No se pudo cambiar: \(error.localizedDescription)")
         }
         launchAtLogin = LaunchAtLogin.isEnabled
+    }
+}
+
+
+struct IntelligenceSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var apiKey = ""
+    @State private var feedback: String?
+    @State private var alias = ""
+    @State private var target = ""
+    @State private var testing = false
+
+    var body: some View {
+        Form {
+            Section(model.t("Model provider", "Proveedor del modelo")) {
+                Toggle(model.t("Use AI for advanced requests", "Usar IA para peticiones avanzadas"), isOn: model.binding(\.model.enabled))
+                TextField(model.t("API base URL", "URL base de la API"), text: model.binding(\.model.endpoint))
+                TextField(model.t("Model name", "Nombre del modelo"), text: model.binding(\.model.model))
+                Text(model.t("Ollama: http://localhost:11434/v1 · llama.cpp and any compatible API. Remote endpoints require HTTPS. Simple commands work offline.",
+                    "Ollama: http://localhost:11434/v1 · llama.cpp y cualquier API compatible. Los servidores remotos requieren HTTPS. Los comandos sencillos funcionan sin conexión."))
+                    .font(.caption).foregroundStyle(.secondary)
+                SecureField(model.t("API key (optional for local models)", "Clave de API (opcional para modelos locales)"), text: $apiKey)
+                HStack {
+                    Button(model.t("Save key", "Guardar clave")) { saveKey() }.disabled(apiKey.isEmpty)
+                    Button(model.t("Remove key", "Eliminar clave")) {
+                        do { try KeychainSecretStore().removeSecret(for: model.settings.model.credentialAccount); feedback = model.t("Key removed.", "Clave eliminada.") }
+                        catch { feedback = model.t("Could not access Keychain.", "No se pudo acceder al Llavero.") }
+                    }
+                    Button(model.t("Test connection", "Probar conexión")) { testConnection() }.disabled(testing)
+                    if testing { ProgressView().controlSize(.small) }
+                }
+                Text(model.t("When enabled, requests, recent session context and tool results are sent to the configured provider. Keys stay in macOS Keychain. No provider is configured by default.",
+                    "Al activarlo, las peticiones, el contexto reciente y los resultados se envían al proveedor configurado. Las claves se guardan en el Llavero. No hay proveedor activo por defecto."))
+                    .font(.caption).foregroundStyle(.secondary)
+                if let feedback { Text(feedback).font(.caption).textSelection(.enabled) }
+            }
+            Section(model.t("Conversation and preferences", "Conversación y preferencias")) {
+                Toggle(model.t("Remember context during this session", "Recordar el contexto durante esta sesión"), isOn: model.binding(\.rememberSession))
+                Toggle(model.t("Use my saved aliases", "Usar mis alias guardados"), isOn: model.binding(\.preferenceMemoryEnabled))
+                TextField(model.t("Default weather location", "Ubicación predeterminada para el tiempo"), text: Binding(get: { model.settings.weatherLocation ?? "" }, set: { value in model.update { $0.weatherLocation = value.isEmpty ? nil : value } }))
+                ForEach(model.settings.aliases.keys.sorted(), id: \.self) { key in
+                    HStack {
+                        Text(key)
+                        Spacer()
+                        Text(model.settings.aliases[key] ?? "").foregroundStyle(.secondary)
+                        Button(role: .destructive) { model.update { $0.aliases[key] = nil } } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                HStack {
+                    TextField(model.t("Alias", "Alias"), text: $alias)
+                    TextField(model.t("Refers to", "Se refiere a"), text: $target)
+                    Button(model.t("Save", "Guardar")) {
+                        model.update { $0.aliases[alias.trimmingCharacters(in: .whitespacesAndNewlines)] = target }
+                        alias = ""; target = ""
+                    }.disabled(alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || target.isEmpty)
+                }
+                Button(model.t("Erase aliases and session context", "Borrar alias y contexto de sesión"), role: .destructive) {
+                    model.update { $0.aliases = [:] }
+                    Task { await model.environment.engine.clearSession("ui") }
+                }
+            }
+        }.formStyle(.grouped)
+    }
+
+    private func saveKey() {
+        do {
+            try KeychainSecretStore().set(apiKey, for: model.settings.model.credentialAccount)
+            apiKey = ""; feedback = model.t("Key saved in Keychain.", "Clave guardada en el Llavero.")
+        } catch { feedback = model.t("Could not save the key.", "No se pudo guardar la clave.") }
+    }
+
+    private func testConnection() {
+        testing = true
+        let configuration = model.settings.model
+        Task {
+            defer { testing = false }
+            do {
+                let provider = CompatibleModelProvider(configuration: configuration, secret: try KeychainSecretStore().secret(for: configuration.credentialAccount))
+                _ = try await provider.complete(system: "Reply with OK.", user: "Connection test")
+                feedback = model.t("Connection succeeded.", "Conexión correcta.")
+            } catch { feedback = model.t("Connection failed. Check endpoint, model, key and whether the server is running.", "No se pudo conectar. Revisa la URL, el modelo, la clave y que el servidor esté activo.") }
+        }
     }
 }

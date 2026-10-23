@@ -10,6 +10,9 @@ public struct InterpretationRequest: Sendable {
     /// The tools that currently exist. Deterministic interpreters ignore this; AI interpreters use it to
     /// build their prompt.
     public var tools: [ToolDescriptor]
+    public var conversation: [ConversationTurn] = []
+    public var observations: [ToolResult] = []
+    public var round = 0
 
     public init(text: String, language: Language, now: Date, calendar: Calendar, settings: JarvisSettings, tools: [ToolDescriptor] = []) {
         self.text = text
@@ -71,5 +74,15 @@ public struct ProposedToolCall: Sendable, Hashable {
     public init(tool: String, arguments: JSONObject) {
         self.tool = tool
         self.arguments = arguments
+    }
+}
+
+/// Bounded, in-memory context. Tool results remain data, never instructions.
+public struct ConversationTurn: Sendable {
+    public var text: String
+    public var results: [ToolResult]
+    public var summary: String
+    public init(text: String, results: [ToolResult], summary: String) {
+        self.text = text; self.results = results; self.summary = summary
     }
 }

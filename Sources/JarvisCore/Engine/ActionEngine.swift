@@ -29,6 +29,33 @@ public actor ActionEngine {
 
     private var pending = PendingActionStore()
     private var duplicates = DuplicateGuard()
+    private var uncertainWrites: [String: Date] = [:]
+    private var conversations: [String: [ConversationTurn]] = [:]
+    private struct Workflow: Sendable {
+        var request: CommandRequest
+        var interpretation: InterpretationRequest
+        var results: [ToolResult]
+        var round: Int
+        var completedWrites: Set<String> = []
+    }
+    private var suspended: [UUID: Workflow] = [:]
+
+    public func clearSession(_ session: String) {
+        conversations[session] = nil
+        for item in pending.items.values where item.session == session {
+            _ = pending.take(token: item.token)
+            suspended[item.commandID] = nil
+        }
+    }
+
+    private func remember(_ response: EngineResponse, request: CommandRequest, settings: JarvisSettings) {
+        guard settings.rememberSession else { conversations[request.session] = nil; return }
+        // Never retain pending confirmations as authority for a subsequent command.
+        var turns = conversations[request.session] ?? []
+        turns.append(ConversationTurn(text: String(request.text.prefix(4000)), results: Array(response.results.suffix(20)), summary: String(response.message.prefix(4000))))
+        conversations[request.session] = Array(turns.suffix(8))
+        if conversations.count > 32, let oldest = conversations.keys.sorted().first(where: { $0 != request.session }) { conversations[oldest] = nil }
+    }
 
     public init(
         registry: ToolRegistry,
@@ -64,6 +91,7 @@ public actor ActionEngine {
         response.id = commandID
         response.startedAt = startedAt
         response.durationMs = Self.milliseconds(since: began, clock: clock)
+        remember(response, request: request, settings: settings)
         await record(response, request: request, settings: settings, isReply: ReplyClassifier.classify(text, optionCount: 0) != nil)
         return response
     }
@@ -84,7 +112,7 @@ public actor ActionEngine {
         response.id = commandID
         response.startedAt = startedAt
         response.durationMs = Self.milliseconds(since: began, clock: clock)
-        if recordHistory { await record(response, request: request, settings: settings, isReply: false) }
+        if recordHistory { remember(response, request: request, settings: settings); await record(response, request: request, settings: settings, isReply: false) }
         return response
     }
 
@@ -96,6 +124,8 @@ public actor ActionEngine {
         let settings = settingsProvider.snapshot()
         let lang = language ?? settings.languagePreference.fixedLanguage ?? fallbackLanguage
         pending.purgeExpired(now: dateProvider.now(), lifetime: limits.pendingLifetime)
+        let waitingIDs = Set(pending.items.values.map(\.commandID))
+        suspended = suspended.filter { waitingIDs.contains($0.key) }
 
         var response = await resolveInternal(token: token, decision: decision, language: lang, source: source, settings: settings, onEvent: onEvent)
         response.startedAt = startedAt
@@ -121,6 +151,8 @@ public actor ActionEngine {
         }
 
         pending.purgeExpired(now: dateProvider.now(), lifetime: limits.pendingLifetime)
+        let waitingIDs = Set(pending.items.values.map(\.commandID))
+        suspended = suspended.filter { waitingIDs.contains($0.key) }
 
         // "yes", "cancel", "2", "la primera" … answer the most recent pending question of this session.
         if let waiting = pending.latest(session: request.session),
@@ -128,10 +160,18 @@ public actor ActionEngine {
             return await resolveInternal(token: waiting.token, decision: decision, language: language, source: request.source, settings: settings, onEvent: onEvent)
         }
 
+        // A correction/new instruction supersedes unanswered actions from this session.
+        // Old confirmation buttons must not apply the scope the user just changed.
+        for item in pending.items.values.filter({ $0.session == request.session }) {
+            _ = pending.take(token: item.token)
+            suspended[item.commandID] = nil
+        }
+
         let calendar = dateProvider.calendar()
-        let interpretationRequest = InterpretationRequest(
+        var interpretationRequest = InterpretationRequest(
             text: text, language: language, now: dateProvider.now(), calendar: calendar, settings: settings, tools: registry.descriptors
         )
+        interpretationRequest.conversation = settings.rememberSession ? conversations[request.session] ?? [] : []
 
         let interpretation: Interpretation
         do {
@@ -145,6 +185,10 @@ public actor ActionEngine {
 
         switch interpretation {
         case .plan(let plan):
+            if plan.continues {
+                let workflow = Workflow(request: request, interpretation: interpretationRequest, results: [], round: 0)
+                return await runWorkflow(workflow, next: plan, commandID: commandID, settings: settings, onEvent: onEvent)
+            }
             return await run(plan: plan, input: text, request: request, commandID: commandID, settings: settings, onEvent: onEvent)
 
         case .clarification(var clarification):
@@ -167,6 +211,76 @@ public actor ActionEngine {
             let base = language.pick("I didn't understand that command.", "No entendí ese comando.")
             return response(.unrecognized, hint.map { base + " " + $0 } ?? base, interpreter: interpreter.identifier)
         }
+    }
+
+    /// Observe/replan rather than guessing outputs of dependent tools in advance.
+    private func runWorkflow(_ initial: Workflow, next initialPlan: ToolPlan?, commandID: UUID, settings: JarvisSettings, onEvent: EngineEventHandler?) async -> EngineResponse {
+        var state = initial
+        var next = initialPlan
+        let language = state.interpretation.language
+        let maximum = settings.model.maxRounds
+        while state.round < maximum {
+            if Task.isCancelled { break }
+            let plan: ToolPlan
+            if let ready = next { plan = ready; next = nil }
+            else {
+                state.interpretation.observations = state.results
+                state.interpretation.round = state.round
+                do {
+                    let decision = try await interpreter.interpret(state.interpretation)
+                    switch decision {
+                    case .plan(let proposed): plan = proposed
+                    case .reply(let text):
+                        var response = Self.makeResponse(id: commandID, input: state.request.text, language: language, results: state.results, interpreter: "agent")
+                        // The result cards are the source of truth; model prose is a summary of those observations.
+                        response.message = text
+                        if state.results.isEmpty { response.status = .reply }
+                        return response
+                    case .clarification(let question):
+                        var response = Self.makeResponse(id: commandID, input: state.request.text, language: language, results: state.results, interpreter: "agent")
+                        response.status = .needsClarification
+                        response.message += "\n" + question.question
+                        return response
+                    case .unrecognized(let hint):
+                        return workflowStopped(state, commandID: commandID, message: hint ?? language.pick("The workflow stopped.", "El flujo se ha detenido."))
+                    }
+                } catch {
+                    return workflowStopped(state, commandID: commandID, message: language.pick("Planning was interrupted. Completed steps are shown below.", "Se interrumpió la planificación. Los pasos completados aparecen debajo."))
+                }
+            }
+            // Validate the whole batch before any write. AI batches cannot race writes with prerequisite reads.
+            let valid = !plan.steps.isEmpty && plan.steps.count <= 10 && plan.steps.allSatisfy { (try? registry.validate($0)) != nil }
+            let mutating = plan.steps.filter { registry.descriptor(for: $0.tool)?.isMutating == true }
+            guard valid, mutating.isEmpty || plan.steps.count == 1 else {
+                return workflowStopped(state, commandID: commandID, message: language.pick("The model proposed an invalid batch. Nothing in that batch ran.", "El modelo propuso un grupo de acciones inválido. No se ejecutó ese grupo."))
+            }
+            // A repeated successful mutation in this workflow is never executed, even outside the short duplicate window.
+            if let write = mutating.first, state.completedWrites.contains(write.tool.rawValue + "|" + JSONValue.object(write.arguments).canonicalString()) {
+                return workflowStopped(state, commandID: commandID, message: language.pick("Stopped a repeated action to avoid a duplicate.", "Se detuvo una acción repetida para evitar un duplicado."))
+            }
+            let response = await run(plan: plan, input: state.request.text, request: state.request, commandID: commandID, settings: settings, onEvent: onEvent)
+            state.round += 1
+            state.results += response.results
+            if let write = mutating.first, response.results.first.map({ $0.success || $0.status == .needsConfirmation || $0.status == .needsClarification }) == true {
+                state.completedWrites.insert(write.tool.rawValue + "|" + JSONValue.object(write.arguments).canonicalString())
+            }
+            if response.results.contains(where: { $0.status == .needsConfirmation || $0.status == .needsClarification }) {
+                suspended[commandID] = state
+                return Self.makeResponse(id: commandID, input: state.request.text, language: language, results: state.results, interpreter: "agent")
+            }
+            // Writes are never automatically retried after unknown outcomes; surface partial completion immediately.
+            if response.results.contains(where: { !$0.success }) {
+                return Self.makeResponse(id: commandID, input: state.request.text, language: language, results: state.results, interpreter: "agent")
+            }
+        }
+        return workflowStopped(state, commandID: commandID, message: language.pick("Stopped at the workflow limit or cancellation; completed steps are shown below.", "Se alcanzó el límite del flujo o se canceló; los pasos completados aparecen debajo."))
+    }
+
+    private func workflowStopped(_ state: Workflow, commandID: UUID, message: String) -> EngineResponse {
+        var response = Self.makeResponse(id: commandID, input: state.request.text, language: state.interpretation.language, results: state.results, interpreter: "agent")
+        response.status = Task.isCancelled ? .cancelled : (state.results.contains(where: \.success) ? .partial : .failed)
+        response.message += (response.message.isEmpty ? "" : "\n") + message
+        return response
     }
 
     // MARK: - Plan execution
@@ -247,15 +361,16 @@ public actor ActionEngine {
         switch (item.kind, decision) {
         case (_, .cancel):
             _ = pending.take(token: token)
-            let message = language.pick("Okay, I cancelled that. Nothing was changed.", "Listo, lo cancelé. No se cambió nada.")
+            let prior = suspended.removeValue(forKey: item.commandID)?.results.filter { $0.success } ?? []
+            let message = prior.isEmpty ? language.pick("Okay, I cancelled that. Nothing was changed.", "Listo, lo cancelé. No se cambió nada.") : language.pick("Cancelled the remaining workflow. Earlier completed steps are preserved.", "Cancelé el resto del flujo. Se conservan los pasos ya completados.")
             await history?.update(id: item.commandID, status: .cancelled, summary: message)
-            return EngineResponse(id: item.commandID, input: "", language: language, status: .cancelled, message: message)
+            return EngineResponse(id: item.commandID, input: "", language: language, status: .cancelled, message: message, results: prior)
 
         case (.confirmation(let request), .confirm):
             _ = pending.take(token: token)
             let result = await executeStep(request.call, context: context, confirmed: true)
             onEvent?(.stepFinished(commandID: item.commandID, result: result))
-            let response = Self.makeResponse(id: item.commandID, input: "", language: language, results: [result], interpreter: "confirmation")
+            let response = await resumeWorkflow(commandID: item.commandID, result: result, language: language, settings: settings, onEvent: onEvent)
             await history?.update(id: item.commandID, status: response.status, summary: response.message)
             return response
 
@@ -264,7 +379,7 @@ public actor ActionEngine {
             let option = clarification.options[index]
             let result = await executeStep(option.call, context: context, confirmed: false)
             onEvent?(.stepFinished(commandID: item.commandID, result: result))
-            let response = Self.makeResponse(id: item.commandID, input: "", language: language, results: [result], interpreter: "clarification")
+            let response = await resumeWorkflow(commandID: item.commandID, result: result, language: language, settings: settings, onEvent: onEvent)
             await history?.update(id: item.commandID, status: response.status, summary: response.message)
             return response
 
@@ -275,6 +390,21 @@ public actor ActionEngine {
                 message: language.pick("Please answer the question above, or say “cancel”.", "Responde a la pregunta anterior o di «cancelar».")
             )
         }
+    }
+
+    private func resumeWorkflow(commandID: UUID, result: ToolResult, language: Language, settings: JarvisSettings, onEvent: EngineEventHandler?) async -> EngineResponse {
+        guard var state = suspended.removeValue(forKey: commandID) else {
+            return Self.makeResponse(id: commandID, input: "", language: language, results: [result], interpreter: "confirmation")
+        }
+        state.results.removeAll { $0.status == .needsConfirmation || $0.status == .needsClarification }
+        state.results.append(result)
+        guard result.success else {
+            if result.status == .needsConfirmation || result.status == .needsClarification { suspended[commandID] = state }
+            return Self.makeResponse(id: commandID, input: state.request.text, language: language, results: state.results, interpreter: "agent")
+        }
+        let response = await runWorkflow(state, next: nil, commandID: commandID, settings: settings, onEvent: onEvent)
+        remember(response, request: state.request, settings: settings)
+        return response
     }
 
     // MARK: - Single step
@@ -339,6 +469,13 @@ public actor ActionEngine {
             return finish(ToolResult(callID: call.id, tool: call.tool, status: .cancelled, message: JarvisError.cancelled.message(in: language), errorCode: "cancelled"))
         }
 
+        // Unknown write outcomes must be re-read by the user before an explicit retry.
+        uncertainWrites = uncertainWrites.filter { dateProvider.now().timeIntervalSince($0.value) < 600 }
+        let actionKey = descriptor.name.rawValue + "|" + JSONValue.object(validated.arguments).canonicalString()
+        if descriptor.deduplicate, !base.allowDuplicate, uncertainWrites[actionKey] != nil {
+            return finish(ToolResult(callID: call.id, tool: call.tool, status: .failed,
+                message: language.pick("The previous attempt may have saved this action. Check the app before explicitly retrying.", "El intento anterior puede haber guardado esta acción. Revisa la app antes de reintentarlo expresamente."), errorCode: "uncertain_write"))
+        }
         // 4. Duplicate protection for creation-style tools
         var duplicateKey: String?
         if descriptor.deduplicate, !base.allowDuplicate {
@@ -368,12 +505,17 @@ public actor ActionEngine {
             }
         } catch {
             if let key = duplicateKey { duplicates.end(key: key, now: dateProvider.now(), succeeded: false) }
-            return finish(Self.failureResult(for: call, error: error, language: language))
+            let failure = Self.failureResult(for: call, error: error, language: language)
+            if descriptor.deduplicate, ["timeout", "cancelled", "verification_failed"].contains(failure.errorCode ?? "") {
+                uncertainWrites[actionKey] = dateProvider.now()
+            }
+            return finish(failure)
         }
 
         // 6. Turn the outcome into a verified result
         switch outcome {
         case .done(let output):
+            uncertainWrites[actionKey] = nil
             if let key = duplicateKey { duplicates.end(key: key, now: dateProvider.now(), succeeded: true) }
             return finish(ToolResult(
                 callID: call.id, tool: call.tool, status: .completed, message: output.message,

@@ -45,6 +45,12 @@ public struct ShortcutNames: Codable, Sendable, Hashable {
 /// running command never sees settings change halfway.
 public struct JarvisSettings: Codable, Sendable, Hashable {
     public var languagePreference: LanguagePreference = .automatic
+    public var model = ModelConfiguration()
+    public var rememberSession = true
+    public var preferenceMemoryEnabled = false
+    /// Explicit aliases only; no automatic harvesting of private data.
+    public var aliases: [String: String] = [:]
+    public var weatherLocation: String?
 
     // Defaults for "default apps" style choices. `nil` means "use the system default".
     public var defaultReminderList: String?
@@ -74,6 +80,7 @@ public struct JarvisSettings: Codable, Sendable, Hashable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
+        case model, rememberSession, preferenceMemoryEnabled, aliases, weatherLocation
         case languagePreference, defaultReminderList, defaultCalendar, defaultNotesAccount, defaultNotesFolder
         case defaultEventDurationMinutes, morningHour, afternoonHour, eveningHour, nightHour
         case conflictPolicy, contactLookupEnabled, musicUsesQueuePlaylist, musicQueuePlaylistName
@@ -83,6 +90,11 @@ public struct JarvisSettings: Codable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = JarvisSettings()
+        model = try c.decodeIfPresent(ModelConfiguration.self, forKey: .model) ?? d.model
+        rememberSession = try c.decodeIfPresent(Bool.self, forKey: .rememberSession) ?? true
+        preferenceMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .preferenceMemoryEnabled) ?? false
+        aliases = try c.decodeIfPresent([String: String].self, forKey: .aliases) ?? [:]
+        weatherLocation = try c.decodeIfPresent(String.self, forKey: .weatherLocation)
         languagePreference = try c.decodeIfPresent(LanguagePreference.self, forKey: .languagePreference) ?? d.languagePreference
         defaultReminderList = try c.decodeIfPresent(String.self, forKey: .defaultReminderList)
         defaultCalendar = try c.decodeIfPresent(String.self, forKey: .defaultCalendar)
@@ -106,6 +118,10 @@ public struct JarvisSettings: Codable, Sendable, Hashable {
     /// Clamps values that came from disk or the UI into safe ranges.
     public func sanitized() -> JarvisSettings {
         var copy = self
+        copy.model.maxRounds = min(max(copy.model.maxRounds, 1), 16)
+        copy.model.endpoint = String(copy.model.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        copy.model.model = String(copy.model.model.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        copy.aliases = copy.aliases.sorted { $0.key < $1.key }.prefix(100).reduce(into: [String: String]()) { $0[String($1.key.prefix(200))] = String($1.value.prefix(500)) }
         copy.defaultEventDurationMinutes = min(max(copy.defaultEventDurationMinutes, 5), 24 * 60)
         copy.morningHour = min(max(copy.morningHour, 0), 23)
         copy.afternoonHour = min(max(copy.afternoonHour, 0), 23)

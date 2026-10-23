@@ -31,10 +31,10 @@ final class AppEnvironment {
         self.integrations = integrations
         let registry = ToolRegistry(integrations: integrations)
         self.registry = registry
-        // Rules first; an AI interpreter can be plugged in here later (see docs/ARCHITECTURE.md).
+        // Configured model first; deterministic tools remain available offline.
         let engine = ActionEngine(
             registry: registry,
-            interpreter: interpreter ?? HybridCommandInterpreter(),
+            interpreter: interpreter ?? ConfiguredAgentInterpreter(),
             settings: settingsStore,
             history: history,
             fallbackLanguage: AppModel.systemLanguage

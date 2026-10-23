@@ -194,3 +194,29 @@ public struct ToolDescriptor: Sendable, Hashable {
     /// Whether the tool changes state (used for duplicate protection).
     public var isMutating: Bool { safety != .readOnly }
 }
+
+public extension ToolParameter {
+    /// Standard JSON Schema, alongside the compact human-readable schema used by older interpreters.
+    var jsonSchema: JSONValue {
+        var schema: JSONObject = ["description": .string(summary)]
+        switch kind {
+        case .string(let max): schema["type"] = "string"; schema["maxLength"] = .int(max)
+        case .integer(let min, let max):
+            schema["type"] = "integer"
+            if let min { schema["minimum"] = .int(min) }; if let max { schema["maximum"] = .int(max) }
+        case .number(let min, let max):
+            schema["type"] = "number"
+            if let min { schema["minimum"] = .double(min) }; if let max { schema["maximum"] = .double(max) }
+        case .boolean: schema["type"] = "boolean"
+        case .enumeration(let options): schema["type"] = "string"; schema["enum"] = .array(options.map(JSONValue.string))
+        case .stringList(let maxItems, let maxLength):
+            schema["type"] = "array"; schema["maxItems"] = .int(maxItems); schema["items"] = ["type": "string", "maxLength": .int(maxLength)]
+        case .dateTime: schema["type"] = "string"; schema["format"] = "date-time"
+        case .date: schema["type"] = "string"; schema["format"] = "date"
+        case .dateOrDateTime: schema["type"] = "string"; schema["anyOf"] = [["format": "date"], ["format": "date-time"]]
+        case .time: schema["type"] = "string"; schema["pattern"] = #"^([01][0-9]|2[0-3]):[0-5][0-9]$"#
+        }
+        if let defaultValue { schema["default"] = defaultValue }
+        return .object(schema)
+    }
+}

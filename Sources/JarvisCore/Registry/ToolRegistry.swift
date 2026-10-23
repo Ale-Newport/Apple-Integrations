@@ -81,6 +81,15 @@ public final class ToolRegistry: Sendable {
                     "description": .string(descriptor.summary),
                     "safety": .string(descriptor.safety.rawValue),
                     "parameters": .object(parameters),
+                    "input_schema": .object(["type": "object", "additionalProperties": false,
+                        "properties": .object(Dictionary(uniqueKeysWithValues: descriptor.parameters.map { ($0.name, $0.jsonSchema) })),
+                        "required": .array(descriptor.parameters.filter(\.required).map { .string($0.name) })]),
+                    "confirmation_required": .bool(descriptor.safety == .destructive),
+                    "availability": .string(descriptor.isSupported ? "supported" : "unsupported"),
+                    "reversible": descriptor.safety == .readOnly ? true : .null,
+                    "timeout_seconds": .double(descriptor.timeout),
+                    "permissions": .array(integrations.first(where: { $0.id == descriptor.integration })?.permissionRequirements.map { .string($0.id) } ?? []),
+                    "possible_errors": ["validation_failed", "permission_required", "not_found", "unsupported", "timeout", "verification_failed"],
                 ]
                 if !descriptor.constraints.isEmpty {
                     object["constraints"] = .array(descriptor.constraints.map { constraint in
