@@ -33,6 +33,26 @@ enum MusicScripts {
     end stateRow
     """#
 
+    static let setPlaybackMode = make("set_playback_mode", #"""
+    on run argv
+    tell application "Music"
+    if (item 1 of argv) is "music.set_shuffle" then
+    set shuffle enabled to ((item 2 of argv) is "true")
+    else
+    set modeName to item 3 of argv
+    if modeName is "one" then
+    set song repeat to one
+    else if modeName is "all" then
+    set song repeat to all
+    else
+    set song repeat to off
+    end if
+    end if
+    end tell
+    return my stateRow()
+    end run
+    """#)
+
     /// Current playback state.
     static let state = make("state", #"""
     on run argv
@@ -103,7 +123,13 @@ enum MusicScripts {
     exit repeat
     end if
     end repeat
-    if target is missing value then error "NOT_FOUND|track" number 9001
+    if target is missing value then
+    try
+    set target to first track of library playlist 1 whose persistent ID is pid
+    on error
+    error "NOT_FOUND|track" number 9001
+    end try
+    end if
     play target
     end tell
     repeat 60 times
@@ -153,7 +179,19 @@ enum MusicScripts {
     set ordered to {}
     repeat with wantedId in wanted
     set position_ to my indexOf((contents of wantedId), foundIds)
-    if position_ > 0 then set end of ordered to (item position_ of found)
+    if position_ > 0 then
+    set end of ordered to (item position_ of found)
+    else
+    tell application "Music"
+    try
+    set exactId to contents of wantedId
+    set exactTrack to first track of library playlist 1 whose persistent ID is exactId
+    set end of ordered to exactTrack
+    on error
+    error "NOT_FOUND|queue track" number 9001
+    end try
+    end tell
+    end if
     end repeat
     if (count of ordered) is 0 then error "NOT_FOUND|queue" number 9001
     tell application "Music"
@@ -294,5 +332,5 @@ enum MusicScripts {
     end run
     """#)
 
-    static let all: [AppleScriptSource] = [state, search, playTrack, playQueue, playPlaylist, listPlaylists, transport, volume]
+    static let all: [AppleScriptSource] = [setPlaybackMode, state, search, playTrack, playQueue, playPlaylist, listPlaylists, transport, volume]
 }

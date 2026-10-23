@@ -80,6 +80,8 @@ public struct MusicIntegration: AppIntegration {
                 .integer("level", "Absolute volume, 0–100.", min: 0, max: 100),
                 .integer("delta", "Relative change, -100…100.", min: -100, max: 100),
             ], [.exactlyOne(["level", "delta"])], examples: [ToolExample("Set the volume to 40", arguments: ["level": 40]), ToolExample("Turn it up", arguments: ["delta": 10])]),
+            tool("music.set_shuffle", "Set shuffle", "Enables or disables Music shuffle.", [.boolean("enabled", "Shuffle enabled.", required: true)]),
+            tool("music.set_repeat", "Set repeat", "Sets repeat mode: off, one track, or all.", [.choice("mode", ["off", "one", "all"], "Repeat mode.", required: true)]),
             tool(.musicNowPlaying, "Now playing", "Reads the current track and playback information.", safety: .readOnly, examples: [ToolExample("What's playing?", arguments: [:])]),
         ]
     }
@@ -139,6 +141,14 @@ public struct MusicIntegration: AppIntegration {
         case .musicListPlaylists: return try await listPlaylists(call, context)
         case .musicSetVolume: return try await setVolume(call, context)
         case .musicNowPlaying: return try await nowPlaying(context)
+        case "music.set_shuffle", "music.set_repeat":
+            let mode = call.string("mode") ?? "off"
+            let shuffle = call.bool("enabled") ?? false
+            let result = try await state(MusicScripts.setPlaybackMode, [call.descriptor.name.rawValue, shuffle ? "true" : "false", mode])
+            guard (call.descriptor.name.rawValue == "music.set_shuffle" ? result.shuffle == shuffle : result.repeatMode == mode) else {
+                throw JarvisError.verificationFailed(LocalizedText(en: "Music did not keep the requested playback mode.", es: "Música no conservó el modo de reproducción solicitado."))
+            }
+            return .done(ToolOutput(message: context.language.pick("Playback mode updated.", "Modo de reproducción actualizado."), data: result.json, verification: .verified("Music read-back")))
         default:
             throw JarvisError.failed("unknown_tool", en: "Music does not provide \(call.descriptor.name).", es: "Música no ofrece \(call.descriptor.name).")
         }
@@ -162,9 +172,21 @@ public struct MusicIntegration: AppIntegration {
         return state
     }
 
-    private func searchLibrary(query: String, kind: String, limit: Int = 100) async throws -> [MusicTrack] {
+    private func searchLibrary(query: String, kind: String, limit: Int = 100, allowFuzzy: Bool = false) async throws -> [MusicTrack] {
         let output = try await run(MusicScripts.search, [query, kind, String(limit)], timeout: 40)
-        return ScriptRecords.parse(output).compactMap(MusicTrack.init(searchFields:))
+        let exact = ScriptRecords.parse(output).compactMap(MusicTrack.init(searchFields:))
+        if !exact.isEmpty || !allowFuzzy { return exact }
+        // Search actual library metadata before applying fuzzy ranking. Never invent a catalogue result.
+        let words = TextFolding.tokens(query).filter { $0.count >= 4 }.sorted { $0.count > $1.count }
+        var queries = Array(words.prefix(2))
+        if let longest = words.first { queries.append(String(longest.prefix(max(4, longest.count / 2)))) }
+        var candidates: [MusicTrack] = []
+        var seen = Set<String>()
+        for broad in queries where broad != TextFolding.fold(query) {
+            let raw = try await run(MusicScripts.search, [broad, kind, String(limit)], timeout: 10)
+            for track in ScriptRecords.parse(raw).compactMap(MusicTrack.init(searchFields:)) where seen.insert(track.id).inserted { candidates.append(track) }
+        }
+        return candidates
     }
 
     private func playlists() async throws -> [MusicPlaylist] {
@@ -175,7 +197,10 @@ public struct MusicIntegration: AppIntegration {
     // MARK: music.play
 
     private func play(_ call: ValidatedToolCall, _ context: ExecutionContext) async throws -> ToolOutcome {
-        let query = call.string("query") ?? ""
+        let rawQuery = call.string("query") ?? ""
+        let builtInAliases = ["the weekend": "The Weeknd"]
+        let explicitAlias = context.settings.preferenceMemoryEnabled ? context.settings.aliases.first(where: { TextFolding.fold($0.key) == TextFolding.fold(rawQuery) })?.value : nil
+        let query = explicitAlias ?? builtInAliases[TextFolding.fold(rawQuery)] ?? rawQuery
         let kind = call.string("kind") ?? "any"
         let artist = call.string("artist")
         let shuffle = call.bool("shuffle") ?? false
@@ -197,6 +222,7 @@ public struct MusicIntegration: AppIntegration {
                 }
             }
         }
+        if tracks.isEmpty { tracks = try await searchLibrary(query: query, kind: kind == "song" ? "song" : kind == "album" ? "album" : kind == "artist" ? "artist" : "any", allowFuzzy: true) }
         guard !tracks.isEmpty else { throw Self.notInLibrary(query, language) }
 
         // 2. Play an exact track when the caller already chose one (clarification option).
@@ -208,20 +234,20 @@ public struct MusicIntegration: AppIntegration {
         // 3. Decide what the user meant.
         switch kind {
         case "album":
-            let matching = tracks.filter { NameMatcher.score(query: query, candidate: $0.album) >= 60 && (artist == nil || NameMatcher.score(query: artist ?? "", candidate: $0.artist) >= 50) }
-            return try await playQueue(matching.isEmpty ? [] : matching, label: matching.first?.album ?? query, searchQuery: query, kind: "album", shuffle: shuffle, orderByAlbum: true, context: context)
+            let matching = tracks.filter { FuzzyNameMatcher.score(query: query, candidate: $0.album) >= 60 && (artist == nil || NameMatcher.score(query: artist ?? "", candidate: $0.artist) >= 50) }
+            return try await playCollection(matching, query: query, kind: "album", artist: artist, shuffle: shuffle, context: context)
         case "artist":
-            let matching = tracks.filter { NameMatcher.score(query: query, candidate: $0.artist) >= 60 }
-            return try await playQueue(matching, label: matching.first?.artist ?? query, searchQuery: query, kind: "artist", shuffle: shuffle, orderByAlbum: true, context: context)
+            let matching = tracks.filter { FuzzyNameMatcher.score(query: query, candidate: $0.artist) >= 60 }
+            return try await playCollection(matching, query: query, kind: "artist", artist: nil, shuffle: shuffle, context: context)
         default:
             break
         }
 
         let ranked = MusicRanking.rank(tracks, query: effectiveQuery, artist: effectiveArtist)
         if let top = ranked.first, top.score >= 85 || kind == "song" {
-            let best = ranked.filter { $0.score == top.score }
+            let best = ranked.filter { $0.score >= top.score - 3 }
             let artists = Set(best.map { TextFolding.fold($0.track.artist) })
-            if artists.count > 1, effectiveArtist == nil {
+            if best.count > 1, (artists.count > 1 && effectiveArtist == nil) || Set(best.map { TextFolding.fold($0.track.name) }).count > 1 {
                 // Several different songs with the same title: ask instead of guessing.
                 let options = best.prefix(5).map { candidate in
                     ClarificationOption(
@@ -235,19 +261,42 @@ public struct MusicIntegration: AppIntegration {
                     options: Array(options)
                 ))
             }
+            if top.score < 85 {
+                return .clarify(Clarification(question: language.pick("Did you mean “\(top.track.display)”?", "¿Te refieres a «\(top.track.display)»?"), options: [ClarificationOption(label: top.track.display, call: call.call.adding(["track_id": .string(top.track.id)]))]))
+            }
             return try await playSingle(top.track, searchQuery: effectiveQuery, kind: kind == "song" ? "song" : "any", context: context)
         }
 
         // 4. No song title matched well: the text may name an artist or an album.
-        let artistMatches = tracks.filter { NameMatcher.score(query: query, candidate: $0.artist) >= 75 }
+        let artistMatches = tracks.filter { FuzzyNameMatcher.score(query: query, candidate: $0.artist) >= 75 }
         if !artistMatches.isEmpty {
-            return try await playQueue(artistMatches, label: artistMatches[0].artist, searchQuery: query, kind: "artist", shuffle: shuffle, orderByAlbum: true, context: context)
+            return try await playCollection(artistMatches, query: query, kind: "artist", artist: nil, shuffle: shuffle, context: context)
         }
-        let albumMatches = tracks.filter { NameMatcher.score(query: query, candidate: $0.album) >= 75 }
+        let albumMatches = tracks.filter { FuzzyNameMatcher.score(query: query, candidate: $0.album) >= 75 }
         if !albumMatches.isEmpty {
-            return try await playQueue(albumMatches, label: albumMatches[0].album, searchQuery: query, kind: "any", shuffle: shuffle, orderByAlbum: true, context: context)
+            return try await playCollection(albumMatches, query: query, kind: "album", artist: artist, shuffle: shuffle, context: context)
         }
         throw Self.notInLibrary(query, language)
+    }
+
+    private func playCollection(_ tracks: [MusicTrack], query: String, kind: String, artist: String?, shuffle: Bool, context: ExecutionContext) async throws -> ToolOutcome {
+        let groups = Dictionary(grouping: tracks) { track in
+            TextFolding.fold(track.artist) + (kind == "album" ? "|" + TextFolding.fold(track.album) : "")
+        }
+        guard !groups.isEmpty else { throw Self.notInLibrary(query, context.language) }
+        if groups.count > 1 {
+            let options = groups.keys.sorted().prefix(8).compactMap { key -> ClarificationOption? in
+                guard let track = groups[key]?.first else { return nil }
+                let label = kind == "album" ? "\(track.album) — \(track.artist)" : track.artist
+                let name = kind == "album" ? track.album : track.artist
+                var args: JSONObject = ["query": .string(name), "kind": .string(kind), "shuffle": .bool(shuffle)]
+                if kind == "album" { args["artist"] = .string(track.artist) }
+                return ClarificationOption(label: label, call: ToolCall(tool: .musicPlay, arguments: args))
+            }
+            return .clarify(Clarification(question: context.language.pick("Which \(kind) did you mean?", "¿A qué \(kind == "album" ? "álbum" : "artista") te refieres?"), options: options))
+        }
+        let label = kind == "album" ? tracks[0].album : tracks[0].artist
+        return try await playQueue(tracks, label: label, searchQuery: query, kind: kind, shuffle: shuffle, orderByAlbum: true, context: context)
     }
 
     private func playSingle(_ track: MusicTrack, searchQuery: String, kind: String, context: ExecutionContext) async throws -> ToolOutcome {
@@ -549,7 +598,11 @@ public struct MusicIntegration: AppIntegration {
         let query = call.string("query") ?? ""
         let kind = call.string("kind") ?? "any"
         let limit = call.int("limit") ?? 10
-        let tracks = try await searchLibrary(query: query, kind: kind, limit: max(limit, 50))
+        let found = try await searchLibrary(query: query, kind: kind, limit: max(limit, 50), allowFuzzy: true)
+        let tracks = found.filter { track in
+            let names = kind == "album" ? [track.album] : kind == "artist" ? [track.artist] : kind == "song" ? [track.name] : [track.name, track.artist, track.album]
+            return names.contains { FuzzyNameMatcher.score(query: query, candidate: $0) >= 50 }
+        }
         let shown = Array(tracks.prefix(limit))
         guard !shown.isEmpty else {
             return .done(ToolOutput(message: language.pick("No songs matching “\(query)” in your library.", "No hay canciones que coincidan con «\(query)» en tu biblioteca."), data: ["results": [], "count": 0], verification: .notApplicable))

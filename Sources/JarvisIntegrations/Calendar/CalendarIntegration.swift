@@ -47,6 +47,16 @@ public struct CalendarIntegration: AppIntegration {
             .string("calendar", "Only events in this calendar.", maxLength: 200),
         ]
         return [
+            tool("calendar.find_free_slots", "Find free slots", "Finds verified free slots across selected calendars, in local working hours, excluding weekends by default. Read first, then create events using the returned slots.", [
+                .dateOrDateTime("start", "Start of search range.", required: true), .dateOrDateTime("end", "End of range, at most 31 days.", required: true),
+                .integer("duration_minutes", "Minimum slot duration.", required: true, min: 5, max: 1440),
+                .integer("start_hour", "First local working hour.", min: 0, max: 23, default: 9), .integer("end_hour", "End local working hour.", min: 1, max: 24, default: 20),
+                .boolean("include_weekends", "Include Saturday and Sunday.", default: false), .string("calendar", "Restrict to this calendar.", maxLength: 200),
+                .integer("limit", "Maximum returned slots.", min: 1, max: 50, default: 10)
+            ], safety: .readOnly),
+            tool("calendar.find_overlaps", "Find overlapping events", "Finds pairs of busy overlapping events in a verified range (up to 31 days).", [
+                .dateOrDateTime("start", "Range start.", required: true), .dateOrDateTime("end", "Range end.", required: true), .string("calendar", "Only this calendar.", maxLength: 200)
+            ], safety: .readOnly),
             tool(.calendarListCalendars, "List calendars", "Lists the user's calendars.", safety: .readOnly),
             tool(.calendarListEvents, "List events", "Lists events between two moments.", [
                 .dateOrDateTime("start", "Start of the range.", required: true),
@@ -124,6 +134,7 @@ public struct CalendarIntegration: AppIntegration {
     public func execute(_ call: ValidatedToolCall, context: ExecutionContext) async throws -> ToolOutcome {
         do {
             switch call.descriptor.name {
+            case "calendar.find_free_slots", "calendar.find_overlaps": return try await analyzeSchedule(call, context)
             case .calendarListCalendars: return try await listCalendars(context)
             case .calendarListEvents: return try await listEvents(call, context)
             case .calendarCreateEvent: return try await create(call, context)
@@ -603,5 +614,68 @@ public struct CalendarIntegration: AppIntegration {
             verification: .verified(language.pick("The event is no longer in Calendar.", "El evento ya no está en Calendario.")),
             warnings: warnings
         ))
+    }
+}
+
+
+private extension CalendarIntegration {
+    func analyzeSchedule(_ call: ValidatedToolCall, _ context: ExecutionContext) async throws -> ToolOutcome {
+        guard let start = call.string("start").flatMap({ ISODates.date(from: $0, timeZone: context.timeZone) }),
+              let end = call.string("end").flatMap({ ISODates.date(from: $0, timeZone: context.timeZone) }),
+              end > start, end.timeIntervalSince(start) <= 32 * 86400 else {
+            throw JarvisError.failed("range", en: "Choose a range of up to 31 days.", es: "Elige un intervalo de hasta 31 días.")
+        }
+        let calendars = try await store.calendars()
+        let selected = try resolveCalendars(calendars, name: call.string("calendar"))
+        let events = try await store.events(from: start, to: end, calendarIDs: selected?.map(\.id)).filter { $0.isBusy && !$0.isDeclined }.sorted { $0.start < $1.start }
+        if call.descriptor.name.rawValue == "calendar.find_overlaps" {
+            var pairs: [JSONValue] = []
+            for (index, first) in events.enumerated() {
+                for second in events.dropFirst(index + 1) {
+                    if second.start >= first.end { break }
+                    if first.overlaps(start: second.start, end: second.end) {
+                        pairs.append(.object(["first": first.json(calendar: context.calendar), "second": second.json(calendar: context.calendar)]))
+                        if pairs.count >= 200 { break }
+                    }
+                }
+                if pairs.count >= 200 { break }
+            }
+            return .done(ToolOutput(message: context.language.pick("Found \(pairs.count) overlapping event pairs.", "Encontré \(pairs.count) pares de eventos que se solapan."), data: ["overlaps": .array(pairs), "truncated": .bool(pairs.count >= 200)], verification: .verified("Calendar events read and compared.")))
+        }
+        let firstHour = call.int("start_hour") ?? 9
+        let lastHour = call.int("end_hour") ?? 20
+        guard firstHour < lastHour else { throw JarvisError.failed("hours", en: "Working hours must end after they start.", es: "El horario debe terminar después de empezar.") }
+        let duration = TimeInterval(call.int("duration_minutes") ?? 60) * 60
+        let limit = call.int("limit") ?? 10
+        var day = context.calendar.startOfDay(for: start)
+        var slots: [JSONValue] = []
+        while day < end, slots.count < limit {
+            try Task.checkCancellation()
+            guard let nextDay = context.calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            defer { day = nextDay }
+            if call.bool("include_weekends") != true, context.calendar.isDateInWeekend(day) { continue }
+            guard let morning = context.calendar.date(bySettingHour: firstHour, minute: 0, second: 0, of: day) else { continue }
+            let evening = lastHour == 24 ? nextDay : context.calendar.date(bySettingHour: lastHour, minute: 0, second: 0, of: day) ?? nextDay
+            var cursor = max(start, morning)
+            let boundary = min(end, evening)
+            func appendGap(until: Date) {
+                while cursor.addingTimeInterval(duration) <= until, slots.count < limit {
+                    let finish = cursor.addingTimeInterval(duration)
+                    slots.append(.object(["start": .string(ISODates.string(from: cursor, timeZone: context.timeZone)), "end": .string(ISODates.string(from: finish, timeZone: context.timeZone))]))
+                    cursor = finish
+                }
+            }
+            for event in events where event.start < boundary && event.end > cursor {
+                appendGap(until: min(event.start, boundary))
+                cursor = max(cursor, event.end)
+                if cursor >= boundary { break }
+            }
+            appendGap(until: boundary)
+        }
+        let lines = slots.compactMap { slot -> String? in
+            guard let start = slot["start"]?.stringValue, let end = slot["end"]?.stringValue else { return nil }
+            return "\(start) → \(end)"
+        }
+        return .done(ToolOutput(message: context.language.pick("Available slots", "Huecos disponibles") + ":\n" + lines.joined(separator: "\n"), data: ["slots": .array(slots), "count": .int(slots.count)], verification: .verified(context.language.pick("Checked all busy events in the selected calendars.", "Comprobados los eventos ocupados en los calendarios seleccionados."))))
     }
 }

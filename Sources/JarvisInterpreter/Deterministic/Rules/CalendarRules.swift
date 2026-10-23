@@ -38,6 +38,15 @@ struct CalendarRules: IntentRuleSet {
     private static let deleteVerb = Rx.make(#"^(?:delete|remove|cancel|erase|drop|elimina|eliminar|borra|borrar|cancela|cancelar|quita|quitar)\s+(?<target>.+)$"#)
 
     func interpret(_ clause: Clause) -> [RuleResult] {
+        let freeText = clause.folded
+        if freeText.contains("hueco") || freeText.contains("free slot") || freeText.contains("cuando estoy libre") {
+            let when = clause.parseDates(allowBareDuration: true).when
+            if let window = ArgumentBuilders.window(when, calendar: clause.context.calendar) {
+                let minutes = Int((when.duration ?? 3600) / 60)
+                return [.calls([ToolCall(tool: "calendar.find_free_slots", arguments: ["start": ArgumentBuilders.dateTime(window.start, calendar: clause.context.calendar), "end": ArgumentBuilders.dateTime(window.end, calendar: clause.context.calendar), "duration_minutes": .int(max(5, minutes))])], confidence: 0.99)]
+            }
+        }
+
         var results: [RuleResult] = []
         let folded = clause.folded
         guard !folded.isEmpty else { return [] }

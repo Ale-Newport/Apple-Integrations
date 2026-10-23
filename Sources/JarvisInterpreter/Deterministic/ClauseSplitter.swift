@@ -11,7 +11,7 @@ enum ClauseLexicon {
         "turn", "start", "wake", "what", "whats", "what's", "how", "tell", "put", "append", "update", "change", "rename",
         "edit", "check", "get", "give", "new", "take", "unpause", "mute", "unmute", "lower", "raise", "increase",
         "decrease", "volume", "book", "plan", "write", "jot", "do", "am", "are", "is", "shuffle", "queue", "enable",
-        "disable", "switch", "postpone", "push", "display", "clear", "run", "begin", "bring", "i",
+        "calculate", "compute", "convert", "calcula", "convierte", "disable", "switch", "postpone", "push", "display", "clear", "run", "begin", "bring", "i",
         // Spanish
         "reproduce", "reproducir", "pon", "ponme", "poner", "ponga", "pausa", "pausar", "deten", "detener", "parar",
         "salta", "saltar", "recuerdame", "recuerda", "recordar", "agrega", "agregar", "agregame", "anade", "anadir",
@@ -55,7 +55,10 @@ enum ClauseSplitter {
     ///   conservative split recognised nothing, so the understood part of a command can still run).
     static func split(_ text: FoldedText, requireCommandStart: Bool = true) -> [FoldedText] {
         let keepTogether = PayloadMasker.attributeRange(in: text)
+        // List/section prefixes belong to the following reminder creation, including the comma before "add".
+        let reminderPrefix = text.firstMatch(Rx.make(#"^(?:en|in|on)\s+(?:(?:la|mi|the|my)\s+)?(?:lista|list)\s+.+?\b(?:anade|agrega|pon|add|put)\s+"#))?.range ?? text.firstMatch(Rx.make(#"^(?:pon|put)\s+(?:en|in)\s+.+?\s+(?:que|that)\s+"#))?.range
         let candidates = text.matches(separator).filter { candidate in
+            if let reminderPrefix, reminderPrefix.overlaps(candidate.range) { return false }
             guard let keepTogether else { return true }
             return !keepTogether.overlaps(candidate.range)
         }

@@ -162,4 +162,28 @@ final class AgentWorkflowTests: XCTestCase {
         XCTAssertEqual(integration.calls.count, 1)
     }
 
+    func testNewInstructionStopsFurtherEffectsOfRunningWorkflow() async {
+        let started = expectation(description: "read started")
+        let integration = MockIntegration(id: "mock", tools: [Fixtures.tool("mock.read", safety: .readOnly), Fixtures.tool("mock.write")]) { call, _ in
+            if call.descriptor.name.rawValue == "mock.read" {
+                started.fulfill()
+                try await Task.sleep(for: .milliseconds(150))
+            }
+            return .done(ToolOutput(message: "Read", verification: .notApplicable))
+        }
+        let interpreter = StubInterpreter { input in
+            if input.text == "new instruction" { return .reply("Updated scope") }
+            var plan = ToolPlan(steps: [ToolCall(tool: input.observations.isEmpty ? "mock.read" : "mock.write")], language: input.language, interpreter: "agent.test")
+            plan.continues = true
+            return .plan(plan)
+        }
+        let engine = Fixtures.engine(integrations: [integration], interpreter: interpreter)
+        let original = Task { await engine.process(CommandRequest(text: "original", source: .test, session: "same")) }
+        await fulfillment(of: [started], timeout: 2)
+        _ = await engine.process(CommandRequest(text: "new instruction", source: .test, session: "same"))
+        let cancelled = await original.value
+        XCTAssertEqual(cancelled.status, .cancelled)
+        XCTAssertEqual(integration.calls.map(\.tool), ["mock.read"])
+    }
+
 }

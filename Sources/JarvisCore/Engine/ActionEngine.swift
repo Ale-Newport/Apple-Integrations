@@ -31,16 +31,19 @@ public actor ActionEngine {
     private var duplicates = DuplicateGuard()
     private var uncertainWrites: [String: Date] = [:]
     private var conversations: [String: [ConversationTurn]] = [:]
+    private var sessionRevisions: [String: Int] = [:]
     private struct Workflow: Sendable {
         var request: CommandRequest
         var interpretation: InterpretationRequest
         var results: [ToolResult]
         var round: Int
+        var revision: Int
         var completedWrites: Set<String> = []
     }
     private var suspended: [UUID: Workflow] = [:]
 
     public func clearSession(_ session: String) {
+        sessionRevisions[session, default: 0] += 1
         conversations[session] = nil
         for item in pending.items.values where item.session == session {
             _ = pending.take(token: item.token)
@@ -49,6 +52,7 @@ public actor ActionEngine {
     }
 
     private func remember(_ response: EngineResponse, request: CommandRequest, settings: JarvisSettings) {
+        guard response.status != .cancelled else { return }
         guard settings.rememberSession else { conversations[request.session] = nil; return }
         // Never retain pending confirmations as authority for a subsequent command.
         var turns = conversations[request.session] ?? []
@@ -160,6 +164,9 @@ public actor ActionEngine {
             return await resolveInternal(token: waiting.token, decision: decision, language: language, source: request.source, settings: settings, onEvent: onEvent)
         }
 
+        sessionRevisions[request.session, default: 0] += 1
+        let revision = sessionRevisions[request.session] ?? 0
+        if sessionRevisions.count > 256, let key = sessionRevisions.keys.first(where: { $0 != request.session }) { sessionRevisions[key] = nil }
         // A correction/new instruction supersedes unanswered actions from this session.
         // Old confirmation buttons must not apply the scope the user just changed.
         for item in pending.items.values.filter({ $0.session == request.session }) {
@@ -185,8 +192,11 @@ public actor ActionEngine {
 
         switch interpretation {
         case .plan(let plan):
+            if (plan.continues || interpreter.identifier == "agent"), sessionRevisions[request.session] != revision {
+                return response(.cancelled, language.pick("Superseded by a newer instruction.", "Sustituido por una instrucción más reciente."))
+            }
             if plan.continues {
-                let workflow = Workflow(request: request, interpretation: interpretationRequest, results: [], round: 0)
+                let workflow = Workflow(request: request, interpretation: interpretationRequest, results: [], round: 0, revision: revision)
                 return await runWorkflow(workflow, next: plan, commandID: commandID, settings: settings, onEvent: onEvent)
             }
             return await run(plan: plan, input: text, request: request, commandID: commandID, settings: settings, onEvent: onEvent)
@@ -220,6 +230,11 @@ public actor ActionEngine {
         let language = state.interpretation.language
         let maximum = settings.model.maxRounds
         while state.round < maximum {
+            guard sessionRevisions[state.request.session] == state.revision else {
+                var response = workflowStopped(state, commandID: commandID, message: language.pick("Stopped because the conversation changed; earlier completed actions are preserved.", "Se detuvo porque cambió la conversación; se conservan las acciones completadas."))
+                response.status = .cancelled
+                return response
+            }
             if Task.isCancelled { break }
             let plan: ToolPlan
             if let ready = next { plan = ready; next = nil }
@@ -248,6 +263,7 @@ public actor ActionEngine {
                     return workflowStopped(state, commandID: commandID, message: language.pick("Planning was interrupted. Completed steps are shown below.", "Se interrumpió la planificación. Los pasos completados aparecen debajo."))
                 }
             }
+            guard sessionRevisions[state.request.session] == state.revision else { continue }
             // Validate the whole batch before any write. AI batches cannot race writes with prerequisite reads.
             let valid = !plan.steps.isEmpty && plan.steps.count <= 10 && plan.steps.allSatisfy { (try? registry.validate($0)) != nil }
             let mutating = plan.steps.filter { registry.descriptor(for: $0.tool)?.isMutating == true }
@@ -258,7 +274,7 @@ public actor ActionEngine {
             if let write = mutating.first, state.completedWrites.contains(write.tool.rawValue + "|" + JSONValue.object(write.arguments).canonicalString()) {
                 return workflowStopped(state, commandID: commandID, message: language.pick("Stopped a repeated action to avoid a duplicate.", "Se detuvo una acción repetida para evitar un duplicado."))
             }
-            let response = await run(plan: plan, input: state.request.text, request: state.request, commandID: commandID, settings: settings, onEvent: onEvent)
+            let response = await run(plan: plan, input: state.request.text, request: state.request, commandID: commandID, settings: settings, onEvent: onEvent, revision: state.revision)
             state.round += 1
             state.results += response.results
             if let write = mutating.first, response.results.first.map({ $0.success || $0.status == .needsConfirmation || $0.status == .needsClarification }) == true {
@@ -285,7 +301,7 @@ public actor ActionEngine {
 
     // MARK: - Plan execution
 
-    private func run(plan: ToolPlan, input: String, request: CommandRequest, commandID: UUID, settings: JarvisSettings, onEvent: EngineEventHandler?) async -> EngineResponse {
+    private func run(plan: ToolPlan, input: String, request: CommandRequest, commandID: UUID, settings: JarvisSettings, onEvent: EngineEventHandler?, revision: Int? = nil) async -> EngineResponse {
         let language = plan.language
         let steps = plan.steps
         guard !steps.isEmpty else {
@@ -296,7 +312,7 @@ public actor ActionEngine {
 
         let calendar = dateProvider.calendar()
         let now = dateProvider.now()
-        let base = StepContext(language: language, now: now, calendar: calendar, settings: settings, source: request.source, session: request.session, commandID: commandID, allowDuplicate: request.allowDuplicate)
+        let base = StepContext(language: language, now: now, calendar: calendar, settings: settings, source: request.source, session: request.session, commandID: commandID, allowDuplicate: request.allowDuplicate, revision: revision)
 
         // Steps of the same integration run in order; different integrations run concurrently.
         var groups: [(key: String, indexes: [Int])] = []
@@ -418,6 +434,7 @@ public actor ActionEngine {
         var session: String
         var commandID: UUID
         var allowDuplicate: Bool
+        var revision: Int? = nil
     }
 
     private func executeStep(_ call: ToolCall, context base: StepContext, confirmed: Bool) async -> ToolResult {
@@ -465,7 +482,7 @@ public actor ActionEngine {
         case .unavailable(let reason):
             return finish(ToolResult(callID: call.id, tool: call.tool, status: .unavailable, message: reason.resolved(language), errorCode: "unavailable"))
         }
-        if Task.isCancelled {
+        if Task.isCancelled || (base.revision != nil && sessionRevisions[base.session] != base.revision) {
             return finish(ToolResult(callID: call.id, tool: call.tool, status: .cancelled, message: JarvisError.cancelled.message(in: language), errorCode: "cancelled"))
         }
 

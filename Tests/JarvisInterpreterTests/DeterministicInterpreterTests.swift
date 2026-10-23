@@ -115,10 +115,11 @@ final class DeterministicInterpreterTests: InterpreterTestCase {
         assertCall(try await single("recuérdame dentro de 30 minutos sacar la ropa"), .remindersCreate, ["title": "Sacar la ropa", "due": "2026-10-17T13:38:00+01:00"], exact: true)
     }
 
-    func testRecurringReminderIsOneTimeButSaysSo() async throws {
+    func testRecurringReminderUsesRealWeeklyRecurrence() async throws {
         let call = try await single("remind me every Monday to submit the report")
         XCTAssertEqual(call.tool, .remindersCreate)
-        XCTAssertFalse(call.assumptions.isEmpty)
+        XCTAssertEqual(call.arguments["recurrence"], "weekly")
+        XCTAssertEqual(call.arguments["title"], "Submit the report")
     }
 
     func testShowPendingReminders() async throws {

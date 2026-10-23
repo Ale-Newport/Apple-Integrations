@@ -37,7 +37,10 @@ public struct RemindersIntegration: AppIntegration {
         ]
         return [
             tool(.remindersCreate, "Create a reminder", "Creates a reminder, optionally in a named list and with a due date/time.", [
-                .string("title", "What to be reminded of.", required: true, maxLength: 500),
+                .string("title", "Actual reminder content only; exclude organizational instructions.", required: true, maxLength: 500),
+                .string("section", "Section requested by the user. Public APIs cannot place reminders in sections; returns unsupported without creating anything.", maxLength: 200),
+                .string("parent_title", "Subtask parent requested by the user. Public APIs cannot create subtasks; returns unsupported without creating anything.", maxLength: 500),
+                .choice("recurrence", ["daily", "weekly", "monthly", "yearly"], "Repeat interval. Requires a due date."),
                 .string("list", "Reminders list name; default list when omitted.", maxLength: 200),
                 .string("list_id", "Exact list id (skips name matching).", maxLength: 200),
                 .dateOrDateTime("due", "Due date (yyyy-MM-dd) or date-time with offset."),
@@ -66,8 +69,15 @@ public struct RemindersIntegration: AppIntegration {
                 .string("new_notes", "New notes.", maxLength: 5_000),
                 .string("new_list", "Move to this list.", maxLength: 200),
                 .choice("new_priority", ["none", "low", "medium", "high"], "New priority."),
-            ], [.atLeastOne(["id", "title"]), .atLeastOne(["new_title", "new_due", "clear_due", "new_notes", "new_list", "new_priority"])]),
+                .choice("new_recurrence", ["none", "daily", "weekly", "monthly", "yearly"], "New recurrence, or none to remove."),
+            ], [.atLeastOne(["id", "title"]), .atLeastOne(["new_title", "new_due", "clear_due", "new_notes", "new_list", "new_priority", "new_recurrence"])]),
             tool(.remindersDelete, "Delete a reminder", "Deletes a reminder after confirmation.", selector, [.atLeastOne(["id", "title"])], safety: .destructive),
+            tool("reminders.rename_list", "Rename a reminder list", "Renames a verified reminder list by stable ID or unambiguous name.", [
+                .string("list_id", "Stable list ID.", maxLength: 200), .string("name", "Current list name.", maxLength: 200), .string("new_name", "New name.", required: true, maxLength: 200)
+            ], [.atLeastOne(["list_id", "name"])]),
+            tool("reminders.delete_list", "Delete a reminder list", "Deletes a list and all its reminders after explicit confirmation. The confirmed reminder IDs must still match.", [
+                .string("list_id", "Stable list ID.", maxLength: 200), .string("name", "List name.", maxLength: 200), .strings("expected_ids", "Reminder IDs captured in the confirmation; never fabricate.", maxItems: 500, maxLength: 200)
+            ], [.atLeastOne(["list_id", "name"])], safety: .destructive),
             tool(.remindersListLists, "List reminder lists", "Lists the user's reminder lists.", safety: .readOnly),
             tool(.remindersCreateList, "Create a reminders list", "Creates a new reminders list.", [
                 .string("name", "Name of the new list.", required: true, maxLength: 200),
@@ -105,6 +115,7 @@ public struct RemindersIntegration: AppIntegration {
     public func execute(_ call: ValidatedToolCall, context: ExecutionContext) async throws -> ToolOutcome {
         do {
             switch call.descriptor.name {
+            case "reminders.rename_list", "reminders.delete_list": return try await changeList(call, context)
             case .remindersCreate: return try await create(call, context)
             case .remindersList: return try await list(call, context)
             case .remindersComplete: return try await complete(call, context)
@@ -212,6 +223,12 @@ public struct RemindersIntegration: AppIntegration {
     private func create(_ call: ValidatedToolCall, _ context: ExecutionContext) async throws -> ToolOutcome {
         let language = context.language
         let title = call.string("title") ?? ""
+        if call.string("section") != nil || call.string("parent_title") != nil {
+            throw JarvisError.unsupported(LocalizedText(en: "Public Reminders APIs cannot create sections or subtasks. No reminder was created.", es: "Las API públicas de Recordatorios no permiten crear secciones ni subtareas. No se creó ningún recordatorio."), alternative: LocalizedText(en: "Choose a regular reminder or organize it in Reminders.", es: "Elige un recordatorio normal u organízalo en Recordatorios."))
+        }
+        if call.string("recurrence") != nil && call.string("due") == nil {
+            return .clarify(Clarification(question: language.pick("When should the first occurrence be due?", "¿Cuándo vence la primera repetición?")))
+        }
         let lists = try await store.lists()
 
         var target: ReminderListInfo
@@ -261,7 +278,7 @@ public struct RemindersIntegration: AppIntegration {
         // Not a second copy of something already pending in the same list.
         let existing = try await store.reminders(in: [target.id], calendar: context.calendar)
         let foldedTitle = TextFolding.fold(title)
-        if let duplicate = existing.first(where: { !$0.isCompleted && TextFolding.fold($0.title) == foldedTitle && sameDue($0, due, calendar: context.calendar) }) {
+        if let duplicate = existing.first(where: { !$0.isCompleted && $0.recurrence == call.string("recurrence") && TextFolding.fold($0.title) == foldedTitle && sameDue($0, due, calendar: context.calendar) }) {
             var data = duplicate.json(calendar: context.calendar).objectValue ?? [:]
             data["created"] = false
             return .done(ToolOutput(
@@ -271,12 +288,12 @@ public struct RemindersIntegration: AppIntegration {
             ))
         }
 
-        let draft = ReminderDraft(title: title, notes: notes, listID: target.id, due: due, priority: Self.priorityValue(call.string("priority")))
+        let draft = ReminderDraft(recurrence: call.string("recurrence"), title: title, notes: notes, listID: target.id, due: due, priority: Self.priorityValue(call.string("priority")))
         let created = try await store.create(draft, calendar: context.calendar)
 
         // Verify by reading the reminder back from the store.
         guard let stored = try await store.reminder(id: created.id, calendar: context.calendar),
-              stored.title == title, stored.listID == target.id, !stored.isCompleted, sameDue(stored, due, calendar: context.calendar) else {
+              stored.title == title, stored.listID == target.id, !stored.isCompleted, stored.recurrence == call.string("recurrence"), stored.notes == notes, stored.priority == Self.priorityValue(call.string("priority")), sameDue(stored, due, calendar: context.calendar) else {
             throw JarvisError.verificationFailed(LocalizedText(
                 en: "Reminders did not return the reminder as saved; please check the app.",
                 es: "Recordatorios no devolvió el recordatorio tal como se guardó; revisa la app."
@@ -514,6 +531,7 @@ public struct RemindersIntegration: AppIntegration {
         var changes = ReminderChanges()
         changes.title = call.string("new_title")
         changes.notes = call.string("new_notes")
+        changes.recurrence = call.string("new_recurrence")
         if let priority = call.string("new_priority") { changes.priority = Self.priorityValue(priority) }
         if call.bool("clear_due") == true {
             changes.clearDue = true
@@ -541,6 +559,8 @@ public struct RemindersIntegration: AppIntegration {
         }
         var matches = true
         if let title = changes.title, stored.title != title { matches = false }
+        if let notes = changes.notes, stored.notes != notes { matches = false }
+        if let recurrence = changes.recurrence, stored.recurrence != (recurrence == "none" ? nil : recurrence) { matches = false }
         if changes.clearDue {
             if stored.due != nil { matches = false }
         } else if let due = changes.due, !sameDue(stored, due, calendar: context.calendar) {
@@ -639,5 +659,39 @@ public struct RemindersIntegration: AppIntegration {
             message: message + ".", data: .object(data),
             verification: .verified(language.pick("The list appears in Reminders.", "La lista aparece en Recordatorios."))
         ))
+    }
+}
+
+
+private extension RemindersIntegration {
+    func changeList(_ call: ValidatedToolCall, _ context: ExecutionContext) async throws -> ToolOutcome {
+        let lists = try await store.lists()
+        let matches: [ReminderListInfo]
+        if let id = call.string("list_id") { matches = lists.filter { $0.id == id } }
+        else { matches = NameMatcher.bestMatches(lists, query: call.string("name") ?? "", minimumScore: 80) { $0.title } }
+        guard let list = matches.first else { throw EventKitFailure.notFound }
+        if matches.count > 1 {
+            return .clarify(Clarification(question: context.language.pick("Which list?", "¿Qué lista?"), options: matches.map { ClarificationOption(label: $0.title, detail: $0.sourceName, call: call.call.adding(["list_id": .string($0.id)])) }))
+        }
+        guard list.allowsModifications else { throw EventKitFailure.readOnly(list.title) }
+        if call.descriptor.name.rawValue == "reminders.rename_list" {
+            let name = call.string("new_name") ?? ""
+            try await store.renameList(id: list.id, title: name)
+            guard try await store.lists().contains(where: { $0.id == list.id && $0.title == name }) else {
+                throw JarvisError.verificationFailed(LocalizedText(en: "The list name was not saved.", es: "No se guardó el nombre de la lista."))
+            }
+            return .done(ToolOutput(message: context.language.pick("Renamed “\(list.title)” to “\(name)”.", "Renombré «\(list.title)» a «\(name)»."), data: ["id": .string(list.id), "name": .string(name)], verification: .verified("Re-read list name.")))
+        }
+        let reminders = try await store.reminders(in: [list.id], calendar: context.calendar)
+        guard reminders.count <= 500 else { throw JarvisError.failed("list_too_large", en: "Delete this large list in Reminders.", es: "Elimina esta lista grande en Recordatorios.") }
+        let ids = reminders.map(\.id).sorted()
+        if !context.isConfirmed || call.strings("expected_ids").sorted() != ids {
+            return .confirm(ConfirmationRequest(prompt: context.language.pick("Delete “\(list.title)” and all \(ids.count) reminders? This cannot be undone.", "¿Eliminar «\(list.title)» y sus \(ids.count) recordatorios? No se puede deshacer."), call: ToolCall(tool: "reminders.delete_list", arguments: ["list_id": .string(list.id), "expected_ids": .array(ids.map(JSONValue.string))]), destructive: true))
+        }
+        try await store.deleteList(id: list.id)
+        guard try await !store.lists().contains(where: { $0.id == list.id }) else {
+            throw JarvisError.verificationFailed(LocalizedText(en: "The list still exists.", es: "La lista sigue existiendo."))
+        }
+        return .done(ToolOutput(message: context.language.pick("Deleted list “\(list.title)”.", "Eliminé la lista «\(list.title)»."), data: ["deleted_list_id": .string(list.id)], verification: .verified("List no longer returned by EventKit.")))
     }
 }

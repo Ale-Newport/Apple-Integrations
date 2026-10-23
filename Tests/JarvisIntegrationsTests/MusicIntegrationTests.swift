@@ -416,4 +416,31 @@ final class MusicIntegrationTests: XCTestCase {
             }
         }
     }
+    func testMisspelledSongSearchesRealCandidatesBeforePlayingVerifiedID() async throws {
+        scripts.on(MusicScripts.search) { args, _ in
+            args[0] == "Bohemian" || args[0] == "bohemian" ? Fx.track("T1", "Bohemian Rhapsody", "Queen", "A Night at the Opera") : ""
+        }
+        scripts.on(MusicScripts.playTrack, returns: Fx.state())
+        let result = try await registry().run(.musicPlay, ["query": "Bohemian Rapsody"])
+        XCTAssertEqual(result.output?.data?["track"]?["id"], "T1")
+        XCTAssertTrue(scripts.calls(to: MusicScripts.search).count > 1)
+    }
+    func testSameAlbumTitleByDifferentArtistsRequiresChoice() async throws {
+        scripts.on(MusicScripts.search, returns: Rec.records([Fx.track("T1", "Song One", "Queen", "Greatest Hits"), Fx.track("T2", "Song Two", "ABBA", "Greatest Hits")]))
+        let result = try await registry().run(.musicPlay, ["query": "Greatest Hits", "kind": "album"])
+        XCTAssertEqual(result.clarification?.options.count, 2)
+        XCTAssertTrue(scripts.calls(to: MusicScripts.playQueue).isEmpty)
+    }
+    func testShuffleAndRepeatAreVerifiedByReadBack() async throws {
+        scripts.on(MusicScripts.setPlaybackMode) { args, _ in
+            let shuffle = args[0] == "music.set_shuffle" ? args[1] : "false"
+            let repeatMode = args[0] == "music.set_repeat" ? args[2] : "off"
+            return Rec.fields("playing", "50", shuffle, repeatMode, "5", "T1", "Song", "Queen", "Album", "355", "purchased", "file track")
+        }
+        let shuffle = try await registry().run("music.set_shuffle", ["enabled": true])
+        XCTAssertEqual(shuffle.output?.data?["shuffle"], true)
+        let repeating = try await registry().run("music.set_repeat", ["mode": "one"])
+        XCTAssertEqual(repeating.output?.data?["repeat"], "one")
+    }
+
 }

@@ -121,9 +121,9 @@ enum MusicRanking {
             // The same song on a compilation and its album is one result.
             let key = TextFolding.fold(track.name) + "|" + TextFolding.fold(track.artist)
             if !seen.insert(key).inserted { continue }
-            var score = NameMatcher.score(query: query, candidate: track.name)
+            var score = FuzzyNameMatcher.score(query: query, candidate: track.name)
             if let artist, !artist.isEmpty {
-                let artistScore = NameMatcher.score(query: artist, candidate: track.artist)
+                let artistScore = FuzzyNameMatcher.score(query: artist, candidate: track.artist)
                 guard artistScore >= 50 else { continue }
                 score = score > 0 ? min(100, score + artistScore / 10) : 0
             }

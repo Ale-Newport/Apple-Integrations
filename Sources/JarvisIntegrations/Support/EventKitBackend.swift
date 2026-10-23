@@ -87,6 +87,21 @@ public actor EventKitBackend: ReminderStoring {
         )
     }
 
+    func renameList(id: String, title: String) async throws {
+        try requireReminders()
+        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else { throw EventKitFailure.notFound }
+        guard list.allowsContentModifications else { throw EventKitFailure.readOnly(list.title) }
+        list.title = title
+        do { try store.saveCalendar(list, commit: true) } catch { throw EventKitFailure.saveFailed(error.localizedDescription) }
+    }
+
+    func deleteList(id: String) async throws {
+        try requireReminders()
+        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else { throw EventKitFailure.notFound }
+        guard list.allowsContentModifications else { throw EventKitFailure.readOnly(list.title) }
+        do { try store.removeCalendar(list, commit: true) } catch { throw EventKitFailure.saveFailed(error.localizedDescription) }
+    }
+
     func reminders(in listIDs: [String]?, calendar: Calendar) async throws -> [ReminderInfo] {
         try requireReminders()
         var calendars: [EKCalendar]?
@@ -118,6 +133,10 @@ public actor EventKitBackend: ReminderStoring {
         reminder.notes = draft.notes
         reminder.priority = draft.priority
         Self.apply(due: draft.due, to: reminder, calendar: calendar)
+        if let recurrence = draft.recurrence {
+            reminder.addRecurrenceRule(Self.recurrenceRule(recurrence))
+            reminder.startDateComponents = reminder.dueDateComponents
+        }
         do {
             try store.save(reminder, commit: true)
         } catch {
@@ -133,6 +152,10 @@ public actor EventKitBackend: ReminderStoring {
         if let notes = changes.notes { reminder.notes = notes }
         if let priority = changes.priority { reminder.priority = priority }
         if let completed = changes.completed { reminder.isCompleted = completed }
+        if let recurrence = changes.recurrence {
+            for rule in reminder.recurrenceRules ?? [] { reminder.removeRecurrenceRule(rule) }
+            if recurrence != "none" { reminder.addRecurrenceRule(Self.recurrenceRule(recurrence)) }
+        }
         if changes.clearDue {
             reminder.dueDateComponents = nil
             for alarm in reminder.alarms ?? [] { reminder.removeAlarm(alarm) }
@@ -161,6 +184,12 @@ public actor EventKitBackend: ReminderStoring {
         } catch {
             throw EventKitFailure.saveFailed(error.localizedDescription)
         }
+    }
+
+    private static func recurrenceRule(_ name: String) -> EKRecurrenceRule {
+        let frequency: EKRecurrenceFrequency
+        switch name { case "daily": frequency = .daily; case "monthly": frequency = .monthly; case "yearly": frequency = .yearly; default: frequency = .weekly }
+        return EKRecurrenceRule(recurrenceWith: frequency, interval: 1, end: nil)
     }
 
     private static func apply(due: DueSpec?, to reminder: EKReminder, calendar: Calendar) {
@@ -192,7 +221,10 @@ public actor EventKitBackend: ReminderStoring {
             listID: reminder.calendar?.calendarIdentifier ?? "", listTitle: reminder.calendar?.title ?? "",
             sourceName: reminder.calendar?.source?.title ?? "", isCompleted: reminder.isCompleted,
             completionDate: reminder.completionDate, due: due, dueHasTime: hasTime, priority: reminder.priority,
-            hasAlarm: reminder.hasAlarms, creationDate: reminder.creationDate
+            hasAlarm: reminder.hasAlarms, creationDate: reminder.creationDate,
+            recurrence: reminder.recurrenceRules?.first.map { rule in
+                switch rule.frequency { case .daily: return "daily"; case .weekly: return "weekly"; case .monthly: return "monthly"; case .yearly: return "yearly"; @unknown default: return "unknown" }
+            }
         )
     }
 

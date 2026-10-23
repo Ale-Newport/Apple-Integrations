@@ -55,7 +55,7 @@ final class ToolContractTests: XCTestCase {
 
     func testDestructiveToolsAreTheOnesThatDelete() {
         let destructive = Set(registry.descriptors.filter { $0.safety == .destructive }.map(\.name))
-        XCTAssertEqual(destructive, [.remindersDelete, .notesDelete, .calendarDeleteEvent, .alarmsDelete])
+        XCTAssertEqual(destructive, [.remindersDelete, .notesDelete, .calendarDeleteEvent, .alarmsDelete, "reminders.delete_list"])
         for descriptor in registry.descriptors where descriptor.safety == .readOnly {
             XCTAssertFalse(descriptor.deduplicate, "\(descriptor.name): read-only tools must never be suppressed as duplicates")
         }

@@ -14,7 +14,7 @@ public struct DeterministicInterpreter: CommandInterpreting {
     private static let minimumConfidence = 0.5
 
     public init() {
-        self.init(ruleSets: [MetaRules(), ClockRules(), MusicRules(), NotesRules(), RemindersRules(), CalendarRules()])
+        self.init(ruleSets: [UtilityRules(), MetaRules(), ClockRules(), MusicRules(), NotesRules(), RemindersRules(), CalendarRules()])
     }
 
     init(ruleSets: [any IntentRuleSet]) {
@@ -22,6 +22,7 @@ public struct DeterministicInterpreter: CommandInterpreting {
     }
 
     public func interpret(_ request: InterpretationRequest) async throws -> Interpretation {
+        if let followup = ContextualFollowup.interpret(request) { return followup }
         let context = DateContext(now: request.now, calendar: request.calendar, settings: request.settings, language: request.language)
         let prepared = Self.prepare(request.text)
 

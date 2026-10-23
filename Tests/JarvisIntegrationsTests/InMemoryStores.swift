@@ -43,6 +43,20 @@ actor InMemoryReminderStore: ReminderStoring {
         return list
     }
 
+    func renameList(id: String, title: String) async throws {
+        try guardAccess()
+        guard let index = listData.firstIndex(where: { $0.id == id }) else { throw EventKitFailure.notFound }
+        guard listData[index].allowsModifications else { throw EventKitFailure.readOnly(listData[index].title) }
+        listData[index].title = title
+    }
+    func deleteList(id: String) async throws {
+        try guardAccess()
+        guard let list = listData.first(where: { $0.id == id }) else { throw EventKitFailure.notFound }
+        guard list.allowsModifications else { throw EventKitFailure.readOnly(list.title) }
+        listData.removeAll { $0.id == id }
+        reminderData.removeAll { $0.listID == id }
+    }
+
     func reminders(in listIDs: [String]?, calendar: Calendar) async throws -> [ReminderInfo] {
         try guardAccess()
         return reminderData.filter { listIDs?.contains($0.listID) ?? true }
@@ -65,6 +79,7 @@ actor InMemoryReminderStore: ReminderStoring {
             id: "R\(counter)", title: draft.title, notes: draft.notes, listID: list.id, listTitle: list.title, sourceName: list.sourceName,
             isCompleted: false, completionDate: nil, due: nil, dueHasTime: false, priority: draft.priority, hasAlarm: false, creationDate: Date()
         )
+        reminder.recurrence = draft.recurrence
         Self.apply(draft.due, to: &reminder, calendar: calendar)
         reminderData.append(reminder)
         return reminder
@@ -76,6 +91,7 @@ actor InMemoryReminderStore: ReminderStoring {
         if let title = changes.title { reminderData[index].title = title }
         if let notes = changes.notes { reminderData[index].notes = notes }
         if let priority = changes.priority { reminderData[index].priority = priority }
+        if let recurrence = changes.recurrence { reminderData[index].recurrence = recurrence == "none" ? nil : recurrence }
         if let completed = changes.completed {
             reminderData[index].isCompleted = completed
             reminderData[index].completionDate = completed ? Date() : nil

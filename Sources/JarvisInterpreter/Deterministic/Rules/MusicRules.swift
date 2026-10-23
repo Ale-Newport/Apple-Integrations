@@ -66,6 +66,10 @@ struct MusicRules: IntentRuleSet {
         guard !folded.isEmpty else { return [] }
         let mentionsAppleMusic = clause.folded.contains("apple music")
 
+        // Playback modes are independent of the current song.
+        if let match = base.whole(Rx.make(#"^(?<state>enable|disable|turn on|turn off|activa|desactiva|quita|pon)\s+(?:el\s+)?shuffle$"#), groups: ["state"]), let state = match.folded("state") {
+            results.append(.calls([ToolCall(tool: "music.set_shuffle", arguments: ["enabled": .bool(["enable", "turn on", "activa", "pon"].contains(state))])], confidence: 0.99))
+        }
         // Transport controls.
         if base.whole(Self.pause, groups: []) != nil { results.append(.calls([ToolCall(tool: .musicPause)], confidence: 0.93)) }
         if base.whole(Self.stop, groups: []) != nil { results.append(.calls([ToolCall(tool: .musicStop)], confidence: 0.85)) }

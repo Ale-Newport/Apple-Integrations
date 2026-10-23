@@ -15,6 +15,7 @@ struct RemindersRules: IntentRuleSet {
 
     // The list phrase at the end of a clause. `before` is greedy so the LAST preposition wins ("talk to Bob to my X list").
     private static let listPhrases: [NSRegularExpression] = [
+        Rx.make(#"^(?<before>.+)\s+a la (?<list>compra)$"#),
         Rx.make(#"^(?<before>.+)\s+(?:to|in|on|into|onto|under|at)\s+(?:my\s+|the\s+|our\s+)?(?:reminders?\s+)?list\s+(?:called\s+|named\s+|titled\s+)(?<list>\S+(?:\s+\S+){0,3}?)$"#),
         Rx.make(#"^(?<before>.+)\s+(?:to|in|on|into|onto|under|at)\s+(?:my\s+|the\s+|our\s+)?(?<list>\S+(?:\s+\S+){0,3}?)\s+(?:reminders?\s+)?list$"#),
         Rx.make(#"^(?<before>.+)\s+(?:to|in|on|into|onto|under|at)\s+(?:my\s+|the\s+|our\s+)?(?:reminders?\s+)?list\s+(?<list>\S+(?:\s+\S+){0,3}?)$"#),
@@ -26,6 +27,8 @@ struct RemindersRules: IntentRuleSet {
         Rx.make(#"^(?<before>.+)\s+(?:a|en|al|dentro de|para)\s+(?:mis\s+|los\s+)?recordatorios\s+(?:de\s+)?(?<list>\S+(?:\s+\S+){0,3}?)$"#),
     ]
     // "…to my reminders" (no list name): default list.
+    private static let leadingList = Rx.make(#"^(?:en|in|on)\s+(?:(?:la|mi|the|my)\s+)?(?:lista|list)\s+(?:de\s+)?(?<list>.+?)(?:,?\s+(?:dentro de|en|within|in)\s+(?:(?:la|the)\s+)?(?:seccion|section)\s+(?<section>.+?))?,?\s+(?:anade|agrega|pon|add|put)\s+(?<content>.+)$"#)
+    private static let leadingPut = Rx.make(#"^(?:pon|put)\s+(?:en|in)\s+(?:(?:la|the)\s+)?(?:lista|list)\s+(?<list>.+?)(?:,?\s+(?:en|in)\s+(?:(?:la|the)\s+)?(?:seccion|section)\s+(?<section>.+?))?,?\s+(?:que|that)\s+(?<content>.+)$"#)
     private static let toRemindersApp = Rx.make(#"^(?<before>.+)\s+(?:to|in|on|into|onto|a|en|al)\s+(?:my\s+|the\s+|mis\s+|mi\s+|los\s+)?(?:reminders?(?: app)?|recordatorios?)$"#)
 
     private static let queryStarter = Rx.make(#"^(?:show|list|display|what|which|see|get|tell|give|check|do i have|have i|whats|what's|are there|how many|muestra|muestrame|mostrar|lista|listar|dime|cuales|que|ver|revisa|consulta|tengo|tienes|hay|cuantos|cuantas)\b"#)
@@ -70,6 +73,13 @@ struct RemindersRules: IntentRuleSet {
         let calendar = clause.context.calendar
         let hasReminderNoun = clause.find(Self.reminderNouns) != nil
 
+        // --- List management uses stable identifiers after resolving a name.
+        if let match = clause.whole(Rx.make(#"^(?:rename|renombra|cambia el nombre de)\s+(?:(?:the|la)\s+)?(?:list|lista)\s+(?<name>.+?)\s+(?:to|a|como)\s+(?<new>.+)$"#), groups: ["name", "new"]), let name = match.original("name"), let new = match.original("new") {
+            return [.calls([ToolCall(tool: "reminders.rename_list", arguments: ["name": .string(TextCleanup.name(name)), "new_name": .string(TextCleanup.name(new))])], confidence: 0.99)]
+        }
+        if let match = clause.whole(Rx.make(#"^(?:delete|remove|borra|elimina)\s+(?:(?:the|la)\s+)?(?:reminders?\s+list|lista(?: de recordatorios)?|list)\s+(?<name>.+)$"#), groups: ["name"]), let name = match.original("name") {
+            return [.calls([ToolCall(tool: "reminders.delete_list", arguments: ["name": .string(TextCleanup.name(name))])], confidence: 0.99)]
+        }
         // --- Lists of lists / create list (no dates involved)
         if clause.whole(Self.showLists, groups: []) != nil, folded.contains("reminder") || folded.contains("recordatorio") || !folded.contains("playlist") {
             let confidence = (folded.contains("reminder") || folded.contains("recordatorio")) ? 0.93 : 0.55
@@ -85,7 +95,8 @@ struct RemindersRules: IntentRuleSet {
         // --- Dates (cut out of the clause)
         let parsed = clause.parseDates()
         let when = parsed.when
-        let rest = TextCleanup.trimConnectors(parsed.remainder)
+        let metadataFirst = clause.folded.hasPrefix("en ") || clause.folded.hasPrefix("in ") || clause.folded.hasPrefix("on ")
+        let rest = metadataFirst ? parsed.remainder.collapsedWhitespace() : TextCleanup.trimConnectors(parsed.remainder)
         let restClause = Clause(text: rest, context: clause.context)
 
         // --- Move reminder to another list
@@ -180,20 +191,34 @@ struct RemindersRules: IntentRuleSet {
     // MARK: Create
 
     private func createCall(_ rest: Clause, when: ParsedWhen, clause: Clause, calendar: Calendar) -> RuleResult? {
-        let (withoutList, list) = Self.extractList(from: rest.text)
-        let working = Clause(text: withoutList, context: clause.context)
+        let extracted = Self.extractList(from: rest.text)
+        var list = extracted.1
+        var section: String?
+        var leadingContent: String?
+        if let match = rest.whole(Self.leadingList, groups: ["list", "section", "content"]) ?? rest.whole(Self.leadingPut, groups: ["list", "section", "content"]) {
+            list = match.original("list").map(TextCleanup.name)
+            section = match.original("section").map(TextCleanup.name)
+            leadingContent = match.original("content")
+        }
+        let working = Clause(text: extracted.0, context: clause.context)
 
         var title: String?
         var confidence = 0.0
         var explicitReminder = false
 
+        if let leadingContent {
+            title = leadingContent
+            confidence = 0.99
+            explicitReminder = true
+        }
         if working.whole(Self.remindMeBare, groups: []) != nil {
             return .clarify(
                 LocalizedText(en: "What should I remind you about?", es: "¿Sobre qué quieres que te recuerde?"),
                 confidence: 0.85
             )
         }
-        if let match = working.whole(Self.remindMe, groups: ["title"]) {
+        if leadingContent != nil { /* metadata-first reminder */ }
+        else if let match = working.whole(Self.remindMe, groups: ["title"]) {
             title = match.original("title")
             confidence = 0.95
             explicitReminder = true
@@ -206,6 +231,16 @@ struct RemindersRules: IntentRuleSet {
             confidence = 0.8
         }
         guard var raw = title else { return nil }
+        var parentTitle: String?
+        if clause.folded.contains("subtarea") || clause.folded.contains("subtask") {
+            let parent = Rx.make(#"^(?:como\s+)?(?:subtarea|subtask)\s+(?:de|of|under)\s+(?<parent>.+?)\s+(?:que|that|:)\s+(?<content>.+)$"#)
+            if let match = FoldedText(raw).wholeMatch(parent, groups: ["parent", "content"]), let content = match.original("content") {
+                parentTitle = match.original("parent")
+                raw = content
+            } else {
+                return .reply(LocalizedText(en: "Public Reminders APIs cannot create subtasks. No reminder was created. Use the Reminders app to organize subtasks.", es: "Las API públicas de Recordatorios no permiten crear subtareas. No se creó ningún recordatorio. Organiza las subtareas en la app Recordatorios."), confidence: 0.99)
+            }
+        }
 
         // Strip "a reminder to", "I have to", …
         raw = Self.stripPrefix(Self.titlePrefix, from: raw)
@@ -221,13 +256,41 @@ struct RemindersRules: IntentRuleSet {
 
         var arguments: JSONObject = ["title": .string(cleaned)]
         if let list { arguments["list"] = .string(list) }
+        if let section { arguments["section"] = .string(section) }
         if let due = ArgumentBuilders.dueValue(when, calendar: calendar) { arguments["due"] = due }
-        var assumptions = when.assumptions
+        let assumptions = when.assumptions
         if clause.find(Self.recurrence) != nil, explicitReminder {
-            assumptions.append(clause.language.pick(
-                "Repeating reminders are not supported yet, so this is a one-time reminder",
-                "Los recordatorios repetitivos aún no se admiten, así que este es un recordatorio único"
-            ))
+            let f = clause.folded
+            let recurrence: String
+            if f.contains("month") || f.contains("mensual") || f.contains("cada mes") { recurrence = "monthly" }
+            else if f.contains("year") || f.contains("anual") || f.contains("cada ano") { recurrence = "yearly" }
+            else if f.contains("daily") || f.contains("every day") || f.contains("cada dia") || f.contains("a diario") || f.contains("todos los dias") { recurrence = "daily" }
+            else { recurrence = "weekly" }
+            arguments["recurrence"] = .string(recurrence)
+            // Remove recurrence metadata left by the date parser from the actual title.
+            let cleanedRecurrence = cleaned.replacingOccurrences(of: #"(?i)\b(?:every|each|cada|todos los|todas las)\s*(?:day|week|month|year|dia|semana|mes|ano)?\b|\b(?:daily|weekly|monthly|yearly|diario|semanal|mensual|anual|a diario)\b"#, with: "", options: .regularExpression)
+            cleaned = TextCleanup.title(cleanedRecurrence)
+            cleaned = Self.stripPrefix(Self.leadingConnector, from: cleaned)
+            arguments["title"] = .string(TextCleanup.title(cleaned))
+        }
+        if let parentTitle { arguments["parent_title"] = .string(parentTitle) }
+        // Comma-separated shopping items become separate, individually verified reminders. Quoted dictation stays intact.
+        let originalTitle = title ?? ""
+        let masked = FoldedText.withQuotesMasked(cleaned)
+        let separators = masked.matches(Rx.make(#",\s*|\s+(?:and|y)\s+"#)).filter { !masked.isMasked($0.range) }
+        if section == nil, arguments["parent_title"] == nil, originalTitle.contains(","), !TextFolding.fold(clause.text.original).contains("\"" + TextFolding.fold(originalTitle) + "\""), !separators.isEmpty {
+            var titles: [String] = []
+            var offset = 0
+            for separator in separators {
+                titles.append(TextCleanup.title(masked.original(offset..<separator.range.lowerBound)))
+                offset = separator.range.upperBound
+            }
+            titles.append(TextCleanup.title(masked.original(offset..<masked.count)))
+            let calls = titles.filter { !$0.isEmpty }.prefix(30).map { value -> ToolCall in
+                var args = arguments; args["title"] = .string(value)
+                return ToolCall(tool: .remindersCreate, arguments: args, assumptions: assumptions)
+            }
+            return .calls(calls, confidence: confidence)
         }
         return .calls([ToolCall(tool: .remindersCreate, arguments: arguments, assumptions: assumptions)], confidence: confidence)
     }

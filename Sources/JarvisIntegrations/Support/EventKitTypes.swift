@@ -55,6 +55,7 @@ struct ReminderInfo: Sendable, Hashable {
     var priority: Int
     var hasAlarm: Bool
     var creationDate: Date?
+    var recurrence: String? = nil
 
     /// Reminders' own priority scale: 1–4 high, 5 medium, 6–9 low, 0 none.
     var priorityName: String {
@@ -70,7 +71,7 @@ struct ReminderInfo: Sendable, Hashable {
         var object: JSONObject = [
             "id": .string(id), "title": .string(title), "list": .string(listTitle), "list_id": .string(listID),
             "account": .string(sourceName), "completed": .bool(isCompleted), "priority": .string(priorityName),
-            "has_alarm": .bool(hasAlarm),
+            "has_alarm": .bool(hasAlarm), "recurrence": recurrence.map(JSONValue.string) ?? .null,
         ]
         if let notes, !notes.isEmpty { object["notes"] = .string(notes) }
         if let due {
@@ -83,6 +84,7 @@ struct ReminderInfo: Sendable, Hashable {
 }
 
 struct ReminderDraft: Sendable {
+    var recurrence: String? = nil
     var title: String
     var notes: String?
     var listID: String
@@ -98,6 +100,7 @@ struct ReminderChanges: Sendable {
     var listID: String?
     var priority: Int?
     var completed: Bool?
+    var recurrence: String?
 }
 
 enum ReminderStatusFilter: String, Sendable { case pending, completed, all }
@@ -107,6 +110,8 @@ protocol ReminderStoring: Sendable {
     func requestAccess() async throws -> EventKitAccess
     func lists() async throws -> [ReminderListInfo]
     func createList(title: String, preferredSourceID: String?) async throws -> ReminderListInfo
+    func renameList(id: String, title: String) async throws
+    func deleteList(id: String) async throws
     func reminders(in listIDs: [String]?, calendar: Calendar) async throws -> [ReminderInfo]
     func reminder(id: String, calendar: Calendar) async throws -> ReminderInfo?
     func create(_ draft: ReminderDraft, calendar: Calendar) async throws -> ReminderInfo
