@@ -74,9 +74,24 @@ every rebuild.
   re-read, the playback state is queried…) and is reported as *verified*, *unverified* (with the reason) or *not
   applicable*. A mocked or unverifiable effect is never reported as verified.
 * **Local only.** The control socket is a Unix-domain socket in your user folder with mode `0600`; the server also
-  checks the peer's user id. There is no network listener, no telemetry and no cloud service.
+  checks the peer's user id. There is no TCP listener or telemetry. Optional configured model requests and weather requests use outbound network connections.
 * **Private data.** History is a JSON file with mode `0600` in `~/Library/Application Support/JarvisAppleIntegrations/`
   (switchable off, clearable); logs use `os.Logger` with private interpolation, so titles, notes and commands never appear
   in plain text in system logs. Any API key for an optional AI interpreter belongs in the macOS Keychain
   (`KeychainSecretStore`), never in settings or files.
 * **No third-party runtime dependencies.** Only Apple frameworks.
+
+
+## Optional inference, weather and timer permissions
+
+The model is disabled by default. Enabling it sends the current request, bounded session context and tool-result
+excerpts to the endpoint configured in Settings ▸ Intelligence. HTTPS is required except for loopback model servers.
+API keys are stored in Keychain, not UserDefaults/history/logs. Clear or disable session context independently of
+history, and view/edit/delete explicit local aliases in the same settings pane.
+
+Weather uses Open-Meteo over HTTPS and sends only the requested city/coordinates; no GPS permission is requested.
+Jarvis timers use UserNotifications and request notification permission on their first create action. These are
+Jarvis notifications, distinct from native Clock alarms, and Focus/sleep/system settings affect their delivery.
+
+No Accessibility automation, private frameworks, Reminders database writes or arbitrary generated shell commands
+are introduced by the upgrade. See [UPGRADE.md](UPGRADE.md) for the full implementation and limitation matrix.

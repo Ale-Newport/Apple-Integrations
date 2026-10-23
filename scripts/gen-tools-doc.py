@@ -24,6 +24,9 @@ SECTIONS = [
     ("calendar", "Calendar", "EventKit (Calendars full access)."),
     ("clock", "Clock (alarms and timers)", "Apple Shortcuts actions of the Clock app, through shortcuts you create once (see SHORTCUTS_SETUP.md)."),
     ("contacts", "Contacts", "Contacts framework (optional; Contacts permission)."),
+    ("weather", "Weather", "Open-Meteo HTTPS API; geocoding by GeoNames; network required."),
+    ("utilities", "Utilities", "Local numeric parser and dimensional unit conversions; no network."),
+    ("jarvis_timers", "Jarvis timers", "Persistent Jarvis notifications; separate from native Clock."),
 ]
 
 SAFETY = {

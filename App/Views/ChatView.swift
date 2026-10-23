@@ -7,6 +7,18 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: model.settings.model.enabled ? "sparkles" : "desktopcomputer")
+                Text(model.settings.model.enabled
+                    ? model.t("AI assistant · \(model.settings.model.model)", "Asistente IA · \(model.settings.model.model)")
+                    : model.t("Local commands · Configure a model in Settings for advanced workflows", "Comandos locales · Configura un modelo en Ajustes para flujos avanzados"))
+                Spacer()
+                if model.settings.rememberSession {
+                    Image(systemName: "bubble.left.and.bubble.right").help(model.t("Session context enabled", "Contexto de sesión activado"))
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 8)
+            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
@@ -124,6 +136,8 @@ struct WelcomeView: View {
     }
 
     private let examples: [Example] = [
+        Example(symbol: "function", english: "Calculate (2+3)^4", spanish: "Calcula el 17,5% de 2.450"),
+        Example(symbol: "cloud.sun", english: "Weather in London tomorrow", spanish: "¿Va a llover mañana en Londres?"),
         Example(symbol: "music.note", english: "Play my Study playlist", spanish: "Pon mi lista Study"),
         Example(symbol: "checklist", english: "Remind me tomorrow at 6 PM to submit my assignment", spanish: "Recuérdame mañana a las 6 PM entregar mi tarea"),
         Example(symbol: "checklist", english: "Add milk to my Shopping reminders list", spanish: "Agrega leche a mi lista de recordatorios Compras"),

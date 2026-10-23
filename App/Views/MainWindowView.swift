@@ -41,7 +41,7 @@ struct SidebarView: View {
                 Label(model.t("Chat", "Chat"), systemImage: "bubble.left.and.bubble.right").tag(SidebarItem.chat)
                 Label(model.t("History", "Historial"), systemImage: "clock.arrow.circlepath").tag(SidebarItem.history)
             }
-            Section(model.t("Apple integrations", "Integraciones de Apple")) {
+            Section(model.t("Integrations and tools", "Integraciones y herramientas")) {
                 ForEach(model.environment.integrations, id: \.id) { integration in
                     HStack {
                         Label(integration.displayName.resolved(model.language), systemImage: integration.symbolName)

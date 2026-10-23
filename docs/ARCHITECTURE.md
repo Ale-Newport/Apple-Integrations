@@ -21,6 +21,27 @@ flowchart LR
 
 `text → interpreter → structured tool calls → validation → permission check → execution → verified result → response`
 
+## Agent execution and configuration
+
+The app now composes `ConfiguredAgentInterpreter`, which selects the user-configured `CompatibleModelProvider` first
+when enabled and falls back to `DeterministicInterpreter` for ordinary offline commands. `HybridCommandInterpreter`
+remains available to embedders. Settings are read per request; no restart is required. Credentials live in Keychain.
+
+A `ToolPlan` with `continues = true` enters the bounded ActionEngine observation loop. Each batch is fully validated
+before effects and consists of independent reads or one write. Results become untrusted data excerpts for the next
+planning call. Failed/unsupported/cancelled steps stop the workflow; pending integration questions suspend its state.
+Confirming resumes it, while a new instruction invalidates stale pending scope. Creation outcomes that could not be
+verified are quarantined against blind repeats. The model never receives an execution or shell interface.
+
+`InterpretationRequest` carries bounded session-scoped `ConversationTurn` data and current workflow observations.
+Context is in memory and independently switchable from on-disk command history. Explicit optional aliases are stored
+in settings and remain data. Tool schemas now include standard JSON Schema, safety, permissions and timeout metadata;
+unknown reversibility is represented as unknown rather than promised.
+
+Weather, numeric utilities and persistent Jarvis notification timers are separate registered integrations. Public
+EventKit handles reminder recurrence and list changes; calendar analysis uses actual observed busy intervals. See
+[UPGRADE.md](UPGRADE.md) for the full capability and platform-limit matrix.
+
 ## Modules
 
 | Module (Swift package `JarvisKit`) | Contents | Depends on |
@@ -67,7 +88,7 @@ requested from one front-end is visible to the same rules as every other. For ea
 
 Pending questions (confirmations and clarifications) live in `PendingActionStore`: tokens are random, single-use,
 expire after 10 minutes, and are scoped to a session so a plain “yes”, “cancel”, “2” or “la primera” answers the most
-recent question *of that session* (`ReplyClassifier`). A reply that does not match the pending question does not consume it.
+recent question *of that session* (`ReplyClassifier`). A new non-answer instruction invalidates pending actions in that session so old buttons cannot apply a superseded scope.
 
 ## Tools: typed contracts
 
@@ -85,7 +106,7 @@ against the schemas. 39 tools are registered; their names live in `ToolName`'s s
   with `NaturalDateParser` (English and Spanish, relative days, weekdays, “next/this”, times with or without AM/PM,
   durations, ranges, DST-safe; ambiguous bare hours are resolved by a documented policy and **surfaced as an
   assumption** the user sees).
-* **AI plug-in (optional)** — implement `LLMTextProvider.complete(system:user:)` (Laya, a local model, a hosted API). The
+* **Custom AI plug-in (optional)** — implement `LLMTextProvider.complete(system:user:)` (Laya, a local model, a hosted API). The
   provided `LLMToolCallInterpreter` builds a prompt from the tool schemas and parses the answer with `AIProposalParser`.
   The output is **untrusted data**: it becomes `ProposedToolCall`s that go through exactly the same validation as
   everything else, so the worst a model can produce is a rejected call.

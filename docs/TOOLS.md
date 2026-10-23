@@ -105,6 +105,26 @@ Searches the user's Music library.
 | `kind` | `enum(any\|song\|album\|artist)` | no | Restrict the search. (default: `"any"`) |
 | `limit` | `integer` | no | Maximum results. (default: `10`) |
 
+### `music.set_repeat`
+
+Sets repeat mode: off, one track, or all.
+
+* **Effect:** changes something (nothing is deleted)
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `mode` | `enum(off\|one\|all)` | yes | Repeat mode. |
+
+### `music.set_shuffle`
+
+Enables or disables Music shuffle.
+
+* **Effect:** changes something (nothing is deleted)
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `enabled` | `boolean` | yes | Shuffle enabled. |
+
 ### `music.set_volume`
 
 Sets Music's volume (0–100) or changes it by a relative amount.
@@ -151,13 +171,16 @@ Creates a reminder, optionally in a named list and with a due date/time.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `title` | `string` | yes | What to be reminded of. |
+| `title` | `string` | yes | Actual reminder content only; exclude organizational instructions. |
 | `create_list_if_missing` | `boolean` | no | Create the list when it does not exist. |
 | `due` | `date\|datetime` | no | Due date (yyyy-MM-dd) or date-time with offset. |
 | `list` | `string` | no | Reminders list name; default list when omitted. |
 | `list_id` | `string` | no | Exact list id (skips name matching). |
 | `notes` | `string` | no | Notes for the reminder. |
+| `parent_title` | `string` | no | Subtask parent requested by the user. Public APIs cannot create subtasks; returns unsupported without creating anything. |
 | `priority` | `enum(none\|low\|medium\|high)` | no | Priority. (default: `"none"`) |
+| `recurrence` | `enum(daily\|weekly\|monthly\|yearly)` | no | Repeat interval. Requires a due date. |
+| `section` | `string` | no | Section requested by the user. Public APIs cannot place reminders in sections; returns unsupported without creating anything. |
 
 ### `reminders.create_list`
 
@@ -182,6 +205,19 @@ Deletes a reminder after confirmation.
 | `list` | `string` | no | Restrict to this reminders list. |
 | `title` | `string` | no | Title (or part of it) of the reminder. |
 
+### `reminders.delete_list`
+
+Deletes a list and all its reminders after explicit confirmation. The confirmed reminder IDs must still match.
+
+* **Effect:** deletes data — always asks first
+* **Constraint:** at least one of: list_id, name
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `expected_ids` | `string[]` | no | Reminder IDs captured in the confirmation; never fabricate. |
+| `list_id` | `string` | no | Stable list ID. |
+| `name` | `string` | no | List name. |
+
 ### `reminders.list`
 
 Lists reminders filtered by list, status and due date.
@@ -205,13 +241,26 @@ Lists the user's reminder lists.
 
 _No parameters._
 
+### `reminders.rename_list`
+
+Renames a verified reminder list by stable ID or unambiguous name.
+
+* **Effect:** changes something (nothing is deleted)
+* **Constraint:** at least one of: list_id, name
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `new_name` | `string` | yes | New name. |
+| `list_id` | `string` | no | Stable list ID. |
+| `name` | `string` | no | Current list name. |
+
 ### `reminders.update`
 
 Changes a reminder's title, due date, notes, list or priority.
 
 * **Effect:** changes something (nothing is deleted)
 * **Constraint:** at least one of: id, title
-* **Constraint:** at least one of: new_title, new_due, clear_due, new_notes, new_list, new_priority
+* **Constraint:** at least one of: new_title, new_due, clear_due, new_notes, new_list, new_priority, new_recurrence
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -222,6 +271,7 @@ Changes a reminder's title, due date, notes, list or priority.
 | `new_list` | `string` | no | Move to this list. |
 | `new_notes` | `string` | no | New notes. |
 | `new_priority` | `enum(none\|low\|medium\|high)` | no | New priority. |
+| `new_recurrence` | `enum(none\|daily\|weekly\|monthly\|yearly)` | no | New recurrence, or none to remove. |
 | `new_title` | `string` | no | New title. |
 | `title` | `string` | no | Title (or part of it) of the reminder. |
 
@@ -393,6 +443,35 @@ Deletes an event after confirmation.
 | `on_date` | `date` | no | Day the event is on (yyyy-MM-dd). Without it, upcoming events are searched. |
 | `title` | `string` | no | Title (or part of it) of the event. |
 
+### `calendar.find_free_slots`
+
+Finds verified free slots across selected calendars, in local working hours, excluding weekends by default. Read first, then create events using the returned slots.
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `duration_minutes` | `integer` | yes | Minimum slot duration. |
+| `end` | `date\|datetime` | yes | End of range, at most 31 days. |
+| `start` | `date\|datetime` | yes | Start of search range. |
+| `calendar` | `string` | no | Restrict to this calendar. |
+| `end_hour` | `integer` | no | End local working hour. (default: `20`) |
+| `include_weekends` | `boolean` | no | Include Saturday and Sunday. (default: `false`) |
+| `limit` | `integer` | no | Maximum returned slots. (default: `10`) |
+| `start_hour` | `integer` | no | First local working hour. (default: `9`) |
+
+### `calendar.find_overlaps`
+
+Finds pairs of busy overlapping events in a verified range (up to 31 days).
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `end` | `date\|datetime` | yes | Range end. |
+| `start` | `date\|datetime` | yes | Range start. |
+| `calendar` | `string` | no | Only this calendar. |
+
 ### `calendar.list_calendars`
 
 Lists the user's calendars.
@@ -529,3 +608,128 @@ Looks up people in Contacts by name.
 | --- | --- | --- | --- |
 | `query` | `string` | yes | Name (or part of it) to look for. |
 | `limit` | `integer` | no | Maximum results. (default: `5`) |
+
+## Weather
+
+_Backend: Open-Meteo HTTPS API; geocoding by GeoNames; network required._
+
+### `weather.forecast`
+
+Real current weather and daily forecast (up to 7 days). Specify a place or use the configured default. Resolve ambiguous cities with place_id from the offered options. No severe alerts, persistent conditions or location tracking.
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `date` | `date` | no | Forecast day; omitted means current and upcoming days. |
+| `location` | `string` | no | City, optionally with country after comma. |
+| `place_id` | `integer` | no | Exact place ID from a clarification. |
+
+## Utilities
+
+_Backend: Local numeric parser and dimensional unit conversions; no network._
+
+### `utilities.calculate`
+
+Evaluates numeric expressions: + - * / ^ %, parentheses, pi/e, sqrt, sin/cos/tan (radians), ln/log, exp, abs, floor/ceil, sum/mean/min/max. Decimal dot; comma separates arguments. No symbolic algebra.
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `expression` | `string` | yes | Numeric expression. |
+
+### `utilities.convert`
+
+Converts compatible length, mass, time, temperature, volume or speed units. No currency conversion.
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | `string` | yes | Unit: m,km,cm,mm,mi,ft,in,kg,g,lb,oz,s,min,h,day,C,F,K,l,ml,m/s,km/h,mph. |
+| `to` | `string` | yes | Target unit. |
+| `value` | `number` | yes | Value. |
+
+### `utilities.date_difference`
+
+Elapsed seconds and calendar days between two ISO dates in the user's timezone.
+
+* **Effect:** read-only
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | `date\|datetime` | yes | Start. |
+| `to` | `date\|datetime` | yes | End. |
+
+## Jarvis timers
+
+_Backend: Persistent Jarvis notifications; separate from native Clock._
+
+### `jarvis_timers.cancel`
+
+cancel a Jarvis timer by stable ID or exact label.
+
+* **Effect:** changes something (nothing is deleted)
+* **Constraint:** at least one of: id, label
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | no | Stable Jarvis timer ID. |
+| `label` | `string` | no | Exact timer label; duplicate labels require clarification. |
+
+### `jarvis_timers.create`
+
+Creates a Jarvis notification timer (not native Clock). Persists through app restarts; macOS may silence notifications under Focus or while asleep.
+
+* **Effect:** changes something (nothing is deleted)
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `duration_seconds` | `integer` | yes | Duration in seconds. |
+| `label` | `string` | no | Timer label. |
+
+### `jarvis_timers.extend`
+
+extend a Jarvis timer by stable ID or exact label.
+
+* **Effect:** changes something (nothing is deleted)
+* **Constraint:** at least one of: id, label
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `seconds` | `integer` | yes | Seconds to add. |
+| `id` | `string` | no | Stable Jarvis timer ID. |
+| `label` | `string` | no | Exact timer label; duplicate labels require clarification. |
+
+### `jarvis_timers.list`
+
+Lists active, paused and elapsed Jarvis timers and remaining seconds.
+
+* **Effect:** read-only
+
+_No parameters._
+
+### `jarvis_timers.pause`
+
+pause a Jarvis timer by stable ID or exact label.
+
+* **Effect:** changes something (nothing is deleted)
+* **Constraint:** at least one of: id, label
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | no | Stable Jarvis timer ID. |
+| `label` | `string` | no | Exact timer label; duplicate labels require clarification. |
+
+### `jarvis_timers.resume`
+
+resume a Jarvis timer by stable ID or exact label.
+
+* **Effect:** changes something (nothing is deleted)
+* **Constraint:** at least one of: id, label
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | no | Stable Jarvis timer ID. |
+| `label` | `string` | no | Exact timer label; duplicate labels require clarification. |

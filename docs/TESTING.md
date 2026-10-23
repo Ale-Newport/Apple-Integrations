@@ -9,7 +9,20 @@ This page separates **three kinds of evidence**, because they are not equally st
 
 > A mocked test is never counted as a real one. Where something was verified only with a fake, it says so.
 
-## 1 · Automated tests (470, all passing)
+## Upgrade verification — 23 October 2026
+
+The current upgrade adds an agent, provider transport, context and integration tests. `swift test` passes **501 tests**:
+112 core, 164 interpreter, 202 integrations and 23 IPC. The full Xcode scheme additionally runs 22 app tests, for
+**523 tests** in total. Debug and Release builds succeed. Source compilation has no warnings; Xcode emits its
+standard metadata-extraction notice because this app has no AppIntents dependency. Tests that create or change app
+data continue to use mocks. A live Open-Meteo HTTPS request for London returned current conditions and seven forecast
+days. The running Debug app also answered IPC ping and successfully ran `utilities.calculate` (428.75 for
+17.5/100*2450) and `weather.forecast` (London, seven days). All 55 tool schemas were exported from the live registry.
+The native UI inspection bridge timed out, so visual inspection of the new settings is not claimed. An experimental
+offscreen render inside the plain XCTest process hit an NSApplication lifecycle conflict and was removed; it is not
+counted as a passing test. New live writes to personal Apple data were not performed. See [UPGRADE.md](UPGRADE.md) for scope and limits.
+
+## 1 · Automated baseline (17 October 2026; 470 tests)
 
 ```bash
 scripts/test.sh            # swift test + xcodebuild test
@@ -123,7 +136,7 @@ scripts/live_tests.py --cleanup --yes       # deletes them, confirming each one 
 | Notes with **attachments** or **passwords**, **recurring** calendar events, reminders in **read-only** lists, accounts with the same list name | require specific data in your accounts | covered with fakes; try on your own data if you have such items |
 | Intel Macs, older macOS (14–26), VoiceOver audit | the Release binary is universal and targets macOS 14, but it was run only on one Apple-silicon Mac with macOS 27 | — |
 | Notarization / Gatekeeper on another Mac | no Developer ID certificate was available; the app is signed with a development identity | notarize with your Developer ID before distributing |
-| A real AI interpreter (Laya, a local model, an API) | only the plumbing and its validation are tested, with a fake provider | implement `LLMTextProvider` (see ARCHITECTURE.md) |
+| A live configured model (local or remote) | the compatible transport and planning behavior are tested with scripted responses; no live model was configured during this run | configure Settings ▸ Intelligence and use Test connection |
 
 ## Developer-only helpers (Debug builds only)
 

@@ -36,7 +36,7 @@ struct IntegrationGuide {
                     ("Create a reminders list called Groceries", "Crea una lista de recordatorios llamada Viajes"),
                 ],
                 limitations: [
-                    ("Repeating reminders are created as one-time reminders (Jarvis tells you).", "Los recordatorios repetitivos se crean como recordatorios únicos (Jarvis te lo dice)."),
+                    ("Daily, weekly, monthly and yearly reminder recurrence is supported. Sections and subtasks require the Reminders app.", "Se admiten recordatorios diarios, semanales, mensuales y anuales. Las secciones y subtareas requieren la app Recordatorios."),
                     ("Deleting always asks first. Duplicate list names in different accounts are never guessed.", "Eliminar siempre pregunta antes. Los nombres de lista duplicados en distintas cuentas nunca se adivinan."),
                 ]
             )
@@ -83,6 +83,14 @@ struct IntegrationGuide {
                     ("Without the optional “Jarvis List Alarms” and “Jarvis Get Timer” shortcuts, actions run but are reported as not verified.", "Sin los atajos opcionales «Jarvis List Alarms» y «Jarvis Get Timer», las acciones se ejecutan pero se informan como no verificadas."),
                 ]
             )
+        case "weather":
+            return IntegrationGuide(examples: [("Weather in London tomorrow", "¿Va a llover mañana en Londres?")], limitations: [
+                ("Data by Open-Meteo (CC BY 4.0), geocoding by GeoNames. The city is sent to Open-Meteo when requested. No background monitoring or severe alerts.", "Datos de Open-Meteo (CC BY 4.0), geocodificación de GeoNames. La ciudad se envía a Open-Meteo al consultarla. Sin seguimiento en segundo plano ni alertas graves."),
+                ("Seven-day forecast; configure a default location in Intelligence settings.", "Previsión de siete días; configura una ubicación predeterminada en los ajustes de Inteligencia.")])
+        case "utilities":
+            return IntegrationGuide(examples: [("Calculate (2+3)^4", "Calcula el 17,5% de 2.450"), ("Convert 10 km to mi", "Convierte 10 km a mi")], limitations: [("Numeric calculations only; no symbolic algebra or live currency rates. Trigonometric angles are radians.", "Cálculos numéricos; sin álgebra simbólica ni tipos de cambio en directo. Los ángulos trigonométricos se expresan en radianes.")])
+        case "jarvis_timers":
+            return IntegrationGuide(examples: [("Start a Jarvis timer for 25 minutes", "Pon un temporizador de Jarvis de 25 minutos")], limitations: [("Uses macOS notifications, separate from Clock. Notification permission is required. Focus, sleep and system notification settings affect delivery.", "Usa notificaciones de macOS, separadas de Reloj. Requiere permiso de notificaciones. El modo de concentración, el reposo y los ajustes del sistema afectan al aviso.")])
         case .contacts:
             return IntegrationGuide(
                 examples: [("Find Daniel in my contacts", "Busca a Daniel en mis contactos")],
