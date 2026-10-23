@@ -1,0 +1,132 @@
+# XcodeGen specification for JarvisAppleIntegrations.xcodeproj
+#
+#   xcodegen generate
+#
+# The Action Engine, interpreter, integrations and IPC live in the local Swift package (Package.swift, product
+# names JarvisCore / JarvisInterpreter / JarvisIntegrations / JarvisIPC). The Xcode project contains only the
+# SwiftUI application, the embedded `jarvisctl` command-line helper and the app-level tests.
+# Build settings are in Config/*.xcconfig (signing overrides go in the git-ignored Config/Local.xcconfig).
+
+name: JarvisAppleIntegrations
+
+options:
+  bundleIdPrefix: com.alejandronewport
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  indentWidth: 4
+  tabWidth: 4
+  usesTabs: false
+  xcodeVersion: "16.0"
+
+configs:
+  Debug: debug
+  Release: release
+
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+
+packages:
+  JarvisKit:
+    path: .
+
+targets:
+  JarvisAppleIntegrations:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - Resources/Info.plist
+          - Resources/JarvisAppleIntegrations.entitlements
+    dependencies:
+      - package: JarvisKit
+        product: JarvisCore
+      - package: JarvisKit
+        product: JarvisInterpreter
+      - package: JarvisKit
+        product: JarvisIntegrations
+      - package: JarvisKit
+        product: JarvisIPC
+      - target: jarvisctl
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+    settings:
+      base:
+        PRODUCT_NAME: Jarvis Apple Integrations
+        INFOPLIST_FILE: App/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Resources/JarvisAppleIntegrations.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  jarvisctl:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/jarvisctl
+    dependencies:
+      - package: JarvisKit
+        product: JarvisIPC
+      - package: JarvisKit
+        product: JarvisCore
+    settings:
+      base:
+        PRODUCT_NAME: jarvisctl
+        PRODUCT_BUNDLE_IDENTIFIER: com.alejandronewport.JarvisAppleIntegrations.jarvisctl
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+
+  # The app's logic (AppModel, AppShell, the views) compiled without the @main file, so the tests run as a plain
+  # logic-test bundle: no app launch, no IPC socket, no global shortcut, no windows.
+  JarvisAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/JarvisAppTests
+      - path: App
+        excludes:
+          - JarvisApp.swift
+          - Resources/**
+    dependencies:
+      - package: JarvisKit
+        product: JarvisCore
+      - package: JarvisKit
+        product: JarvisInterpreter
+      - package: JarvisKit
+        product: JarvisIntegrations
+      - package: JarvisKit
+        product: JarvisIPC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.alejandronewport.JarvisAppleIntegrations.AppTests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: ""
+
+schemes:
+  JarvisAppleIntegrations:
+    build:
+      targets:
+        JarvisAppleIntegrations: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - JarvisAppTests
+        - package: JarvisKit/JarvisCoreTests
+        - package: JarvisKit/JarvisInterpreterTests
+        - package: JarvisKit/JarvisIntegrationsTests
+        - package: JarvisKit/JarvisIPCTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

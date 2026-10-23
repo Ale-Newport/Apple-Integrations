@@ -1,0 +1,21 @@
+# Build products
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+*.app
+*.dSYM
+
+# Local, machine-specific signing configuration (copy Config/Local.xcconfig.example)
+Config/Local.xcconfig
+
+# macOS
+.DS_Store
+
+# Test artefacts
+*.profraw
+__pycache__/
+*.pyc

@@ -1,0 +1,8 @@
+// Copy to Local.xcconfig (ignored by git) to sign with your own Apple Developer identity.
+// A stable signature keeps macOS privacy permissions (Automation, Calendars, Reminders, Contacts) granted
+// across rebuilds; with the default ad-hoc signature macOS asks again after every build.
+//
+// Find your values with:  security find-identity -v -p codesigning
+
+DEVELOPMENT_TEAM = YOURTEAMID
+CODE_SIGN_IDENTITY = Apple Development

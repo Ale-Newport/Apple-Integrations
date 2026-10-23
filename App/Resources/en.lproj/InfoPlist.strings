@@ -1,0 +1,6 @@
+"CFBundleDisplayName" = "Jarvis Apple Integrations";
+"CFBundleName" = "Jarvis";
+"NSAppleEventsUsageDescription" = "Jarvis uses Apple Events to control Music and Notes when you ask it to play music or manage notes. It never reads or changes anything you did not ask for.";
+"NSCalendarsFullAccessUsageDescription" = "Jarvis needs access to Calendar to show, create, move and cancel events when you ask it to.";
+"NSRemindersFullAccessUsageDescription" = "Jarvis needs access to Reminders to create, show, complete and delete reminders when you ask it to.";
+"NSContactsUsageDescription" = "Jarvis can look up people you mention (for example “meeting with Daniel”) in Contacts. This is optional and only used when you turn it on.";
