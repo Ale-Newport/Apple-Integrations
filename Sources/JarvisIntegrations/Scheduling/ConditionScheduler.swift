@@ -68,6 +68,8 @@ public struct WeatherConditionJob: Codable, Sendable, Identifiable {
     public var nextAttempt: Date?
     public var rainProbability: Double?
     public var error: String?
+    /// nil preserves the original at-least behavior of saved jobs.
+    public var comparison: String?
     var notificationID: String { "jarvis.condition." + id }
     func json(zone: TimeZone) -> JSONValue {
         [
@@ -78,6 +80,7 @@ public struct WeatherConditionJob: Codable, Sendable, Identifiable {
             "last_check": lastCheck.map { .string(ISODates.string(from: $0, timeZone: zone)) } ?? .null,
             "rain_probability_percent": rainProbability.map(JSONValue.double) ?? .null,
             "last_error": error.map(JSONValue.string) ?? .null, "backend": "jarvis_condition_agent_notifications",
+            "comparison": .string(comparison ?? "at_least"),
         ]
     }
 }
@@ -198,8 +201,9 @@ public actor ConditionJobStore {
                     else { return false }
                     jobs[index].rainProbability = probability
                     jobs[index].error = nil
-                    jobs[index].status = probability >= job.threshold ? "delivery_pending" : "condition_not_met"
-                    return probability >= job.threshold
+                    let matches = job.comparison == "above" ? probability > job.threshold : probability >= job.threshold
+                    jobs[index].status = matches ? "delivery_pending" : "condition_not_met"
+                    return matches
                 }
                 if notify {
                     guard isEnabled(), await notifier.allowed(request: false) else { throw CocoaError(.userCancelled) }
@@ -274,6 +278,9 @@ public struct ConditionsIntegration: AppIntegration {
                     .date("forecast_date", "Forecast day to evaluate.", required: true),
                     .dateTime("check_at", "Future check time, up to seven days ahead.", required: true),
                     .number("threshold_percent", "Rain probability threshold.", min: 0, max: 100, default: 50),
+                    .choice(
+                        "comparison", ["above", "at_least"],
+                        "Strictly greater than, or greater than/equal to, the threshold.", default: "above"),
                     .string("title", "Notification text.", required: true, maxLength: 500),
                     .integer(
                         "expiry_minutes", "Expiry after check time; delayed expired jobs do not notify.", min: 15,
@@ -349,14 +356,15 @@ public struct ConditionsIntegration: AppIntegration {
                 ConfirmationRequest(
                     prompt: context.language.pick(
                         "Save this future weather check?", "¿Guardar esta comprobación futura del tiempo?")
-                        + "\n\(call.string("location") ?? "") · \(call.string("forecast_date") ?? "")\nRain ≥ \(call.arguments["threshold_percent"]?.doubleValue ?? 50)%\n\(call.string("check_at") ?? "")\n\(call.string("title") ?? "")\nJarvis notification; may be delayed by sleep/offline.",
+                        + "\n\(call.string("location") ?? "") · \(call.string("forecast_date") ?? "")\nRain \(call.string("comparison") == "above" ? ">" : "≥") \(call.arguments["threshold_percent"]?.doubleValue ?? 50)%\n\(call.string("check_at") ?? "")\n\(call.string("title") ?? "")\nJarvis notification; may be delayed by sleep/offline.",
                     call: call.call, destructive: false))
         }
-        let job = WeatherConditionJob(
+        var job = WeatherConditionJob(
             id: UUID().uuidString, location: call.string("location")!, placeID: call.int("place_id")!,
             forecastDate: call.string("forecast_date")!,
             threshold: call.arguments["threshold_percent"]?.doubleValue ?? 50, title: call.string("title")!,
             checkAt: at, expires: at.addingTimeInterval(Double(call.int("expiry_minutes") ?? 360) * 60))
+        job.comparison = call.string("comparison") ?? "above"
         try await store.insert(job)
         return .done(
             ToolOutput(

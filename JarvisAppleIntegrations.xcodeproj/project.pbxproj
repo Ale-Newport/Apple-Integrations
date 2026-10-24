@@ -109,10 +109,10 @@
 		A6A5658BAD8EB918F066C792 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Library/LoginItems;
+			dstPath = Contents/Helpers;
 			dstSubfolderSpec = 1;
 			files = (
-				CC98AEEBBAF3A4301913ACE1 /* JarvisConditionAgent.app in Embed Dependencies */,
+				9096934CBC1557F794A87DC9 /* jarvisctl in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -120,10 +120,10 @@
 		BB2CED5D8BBF4859D360026B /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
+			dstPath = Contents/Library/LoginItems;
 			dstSubfolderSpec = 1;
 			files = (
-				9096934CBC1557F794A87DC9 /* jarvisctl in Embed Dependencies */,
+				CC98AEEBBAF3A4301913ACE1 /* JarvisConditionAgent.app in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;

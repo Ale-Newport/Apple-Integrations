@@ -71,13 +71,16 @@
             let makeView: @MainActor (AppModel, AppShell) -> AnyView
         }
 
-        static func run(model: AppModel, shell: AppShell, directory: String) async {
+        static func run(model: AppModel, directory: String) async {
+            let shell = AppShell(defaults: UserDefaults(suiteName: fixtureSuite ?? "jarvis.preview")!)
             defer {
                 if let fixtureSuite { UserDefaults.standard.removePersistentDomain(forName: fixtureSuite) }
                 if let fixtureDirectory { try? FileManager.default.removeItem(at: fixtureDirectory) }
             }
             let folder = URL(fileURLWithPath: directory, isDirectory: true)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? JSONEncoder().encode(model.environment.registry.schemaDescription()).write(
+                to: folder.appendingPathComponent("tools.json"))
 
             let main = CGSize(width: 960, height: 680)
             let settings = CGSize(width: 680, height: 560)
@@ -120,20 +123,32 @@
                 for scene in scenes {
                     scene.prepare(model)
                     try? await Task.sleep(for: .milliseconds(900))
-                    render(
+                    await render(
                         scene.makeView(model, shell), size: scene.size, appearance: appearance,
                         to: folder.appendingPathComponent("\(scene.name)-\(suffix).png"))
                 }
             }
         }
 
-        private static func render(_ view: AnyView, size: CGSize, appearance: NSAppearance.Name, to url: URL) {
-            let host = NSHostingView(rootView: view)
+        private static func render(_ view: AnyView, size: CGSize, appearance: NSAppearance.Name, to url: URL) async {
+            let scheme: ColorScheme = appearance == .darkAqua ? .dark : .light
+            let host = NSHostingView(
+                rootView: view.environment(\.colorScheme, scheme).preferredColorScheme(scheme).frame(
+                    width: size.width, height: size.height))
             host.frame = NSRect(origin: .zero, size: size)
             let window = NSWindow(
                 contentRect: host.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             window.appearance = NSAppearance(named: appearance)
+            host.appearance = window.appearance
+            window.isReleasedWhenClosed = false
             window.contentView = host
+            window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+            window.orderFront(nil)
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            try? await Task.sleep(for: .milliseconds(100))
             host.layoutSubtreeIfNeeded()
             host.displayIfNeeded()
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
@@ -151,13 +166,14 @@
         let summary: LocalizedText
         let symbolName: String
         let tools: [ToolDescriptor]
-        let permissionRequirements: [PermissionRequirement] = []
+        let permissionRequirements: [PermissionRequirement]
         init(_ integration: any AppIntegration) {
             id = integration.id
             displayName = integration.displayName
             summary = integration.summary
             symbolName = integration.symbolName
             tools = integration.tools
+            permissionRequirements = integration.permissionRequirements
         }
         func status() async -> IntegrationStatus { IntegrationStatus(state: .ready) }
         func authorization(for tool: ToolDescriptor) async -> AuthorizationState { .authorized }

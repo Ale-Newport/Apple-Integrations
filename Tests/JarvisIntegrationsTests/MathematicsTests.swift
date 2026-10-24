@@ -4,6 +4,40 @@ import XCTest
 @testable import JarvisIntegrations
 
 final class MathematicsTests: XCTestCase {
+    func testOverflowingStatisticsCannotReturnVerifiedNonFiniteData() async throws {
+        let registry = ToolRegistry(integrations: [UtilitiesIntegration()])
+        do {
+            _ = try await registry.run("utilities.statistics", ["values": "1e308,1e308"])
+            XCTFail()
+        } catch {}
+        do {
+            _ = try await registry.run("utilities.differentiate", ["expression": "1e308*1e308*x"])
+            XCTFail()
+        } catch {}
+        do {
+            _ = try await registry.run("utilities.integrate", ["expression": "1e308*1e308*x"])
+            XCTFail()
+        } catch {}
+    }
+    func testCurrencyValidatesDateAndActualCurrencyPair() async throws {
+        let now = ISODates.date(from: "2026-10-24T12:00:00Z", timeZone: .gmt)!
+        for date in ["2026-10-23", "2026-10-25", "2020-01-01", "not-a-date"] {
+            let registry = ToolRegistry(integrations: [
+                UtilitiesIntegration(currencyRates: WeatherCache(loader: CurrencyFixture(date: date)))
+            ])
+            do {
+                let outcome = try await registry.run(
+                    "utilities.currency", ["amount": 10, "from": "EUR", "to": "USD"],
+                    context: executionContext(now: now))
+                XCTAssertEqual(date, "2026-10-23")
+                XCTAssertEqual(outcome.output?.data?["value"]?.doubleValue, 12)
+                XCTAssertEqual(outcome.output?.data?["quote_type"], "daily_reference")
+            } catch let error as JarvisError {
+                XCTAssertNotEqual(date, "2026-10-23")
+                XCTAssertEqual(error.code, "currency_date")
+            }
+        }
+    }
     func testSymbolicDerivativeProductAndChainRulesAgainstKnownResults() throws {
         let d = try MathExpression.parse("x³ sin(x)").derivative
         for x in [-2.0, -0.1, 0, 0.5, 3] {
@@ -60,5 +94,12 @@ final class MathematicsTests: XCTestCase {
         let dice = try await registry.run("utilities.random", ["operation": "dice", "count": 100])
         XCTAssertEqual(dice.output?.data?["results"]?.arrayValue?.count, 100)
         XCTAssertTrue(dice.output!.data!["results"]!.arrayValue!.allSatisfy { (1...6).contains($0.intValue ?? 0) })
+    }
+}
+
+private struct CurrencyFixture: WeatherDataLoading {
+    let date: String
+    func load(_ url: URL) async throws -> JSONValue {
+        ["base": "EUR", "quote": "USD", "date": .string(date), "rate": 1.2]
     }
 }

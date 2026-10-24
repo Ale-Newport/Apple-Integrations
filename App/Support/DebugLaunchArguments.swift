@@ -22,14 +22,7 @@
                 Task { @MainActor in await DebugSelfTest.run(outputPath: output) }
                 return
             }
-            if let directory = defaults.string(forKey: "JarvisSnapshotDir") {
-                Task { @MainActor in
-                    DebugSnapshots.prepareSampleConversation(self)
-                    await DebugSnapshots.run(model: self, shell: shell, directory: directory)
-                    NSApplication.shared.terminate(nil)
-                }
-                return
-            }
+            if defaults.string(forKey: "JarvisSnapshotDir") != nil { return }
             if let screen = defaults.string(forKey: "JarvisScreen") {
                 switch screen {
                 case "chat": selection = .chat

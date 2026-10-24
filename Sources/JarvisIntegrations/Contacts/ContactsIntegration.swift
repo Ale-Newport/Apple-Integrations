@@ -17,6 +17,8 @@ struct ContactMatch: Sendable, Hashable {
     var phones: [String]
     var organization: String
     var nickname: String = ""
+    var givenName: String = ""
+    var familyName: String = ""
 
     var json: JSONValue {
         .object([
@@ -24,6 +26,7 @@ struct ContactMatch: Sendable, Hashable {
             "emails": .array(emails.map(JSONValue.string)),
             "phones": .array(phones.map(JSONValue.string)),
             "organization": organization.isEmpty ? .null : .string(organization),
+            "given_name": .string(givenName), "family_name": .string(familyName),
         ])
     }
 }
@@ -74,7 +77,8 @@ struct SystemContactsLookup: ContactsLookup {
             fullName: CNContactFormatter.string(from: contact, style: .fullName) ?? contact.organizationName,
             emails: contact.emailAddresses.map { String($0.value) },
             phones: contact.phoneNumbers.map { $0.value.stringValue },
-            organization: contact.organizationName, nickname: contact.nickname)
+            organization: contact.organizationName, nickname: contact.nickname, givenName: contact.givenName,
+            familyName: contact.familyName)
     }
     func find(_ query: String, limit: Int) async throws -> [ContactMatch] {
         let request = CNContactFetchRequest(keysToFetch: keys)
@@ -158,7 +162,8 @@ public struct ContactsIntegration: AppIntegration {
             ToolDescriptor(
                 name: "contacts.create", integration: id, title: "Create contact",
                 summary: "Creates a contact after explicit review. Reads back saved fields and stable ID.",
-                parameters: fields, constraints: [.atLeastOne(["given_name", "family_name", "organization"])],
+                parameters: fields + [.string("revision", "Confirmation revision.", maxLength: 100)],
+                constraints: [.atLeastOne(["given_name", "family_name", "organization"])],
                 safety: .modifying, deduplicate: true, requiresConfirmation: true),
             ToolDescriptor(
                 name: "contacts.update", integration: id, title: "Edit contact",
@@ -239,6 +244,30 @@ public struct ContactsIntegration: AppIntegration {
                         call: call.call.adding(["revision": .string(revision)]), destructive: false))
             }
             let saved = try await lookup.save(id: call.string("id"), fields: values)
+            let scalarFields = [
+                "given_name": saved.givenName, "family_name": saved.familyName, "nickname": saved.nickname,
+                "organization": saved.organization,
+            ]
+            for (key, actual) in scalarFields where values[key] != nil {
+                guard actual == values[key] else {
+                    throw JarvisError.verificationFailed(
+                        LocalizedText(
+                            en: "Contacts did not retain every requested field. Inspect the contact before retrying.",
+                            es:
+                                "Contactos no conservó todos los campos solicitados. Revisa el contacto antes de reintentar."
+                        ))
+                }
+            }
+            if let email = values["email"],
+                !saved.emails.contains(where: { $0.caseInsensitiveCompare(email) == .orderedSame })
+            {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            if let phone = values["phone"],
+                !saved.phones.contains(where: { $0.filter(\.isNumber) == phone.filter(\.isNumber) })
+            {
+                throw CocoaError(.fileWriteUnknown)
+            }
             return .done(
                 ToolOutput(
                     message: context.language.pick("Contact saved and read back.", "Contacto guardado y releído."),

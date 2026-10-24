@@ -105,9 +105,10 @@ extension UtilitiesIntegration {
         switch call.descriptor.name.rawValue {
         case "utilities.differentiate":
             let derivative = try MathExpression.parse(call.string("expression") ?? "").derivative
+            guard derivative.hasFiniteConstants else { throw Calculator.Failure.nonFinite }
             data = [
                 "expression": .string(derivative.text), "method": "symbolic_chain_product_quotient_rules",
-                "exact_symbolic": true,
+                "symbolic": true, "coefficient_arithmetic": "IEEE-754 double",
             ]
             message = derivative.text
             if let point = call.arguments["at"]?.doubleValue {
@@ -122,6 +123,7 @@ extension UtilitiesIntegration {
             let upper = call.arguments["to"]?.doubleValue
             guard (lower == nil) == (upper == nil) else { throw Calculator.Failure.invalidExpression }
             if let coefficients = expression.polynomial {
+                guard coefficients.allSatisfy(\.isFinite) else { throw Calculator.Failure.nonFinite }
                 let antiderivative = coefficients.enumerated().reduce(MathExpression.number(0)) { result, pair in
                     .sum(
                         result,
@@ -348,6 +350,16 @@ extension UtilitiesIntegration {
             guard let rate = quote["rate"]?.doubleValue, rate > 0, let date = quote["date"]?.stringValue,
                 quote["base"]?.stringValue?.uppercased() == from, quote["quote"]?.stringValue?.uppercased() == to
             else { throw URLError(.cannotParseResponse) }
+            guard ISODates.isDate(date), let quoteDate = ISODates.date(from: date, timeZone: .gmt),
+                date <= ISODates.dayString(from: context.now, timeZone: .gmt),
+                context.now.timeIntervalSince(quoteDate) <= 10 * 86400
+            else {
+                throw integrationFailure(
+                    "currency_date",
+                    "The provider returned a future, invalid or stale reference date. No usable current conversion was verified.",
+                    "El proveedor devolvió una fecha futura, inválida o antigua. No se verificó una conversión actual válida."
+                )
+            }
             let value = number("amount") * rate
             guard value.isFinite else { throw Calculator.Failure.nonFinite }
             data = [
@@ -357,6 +369,15 @@ extension UtilitiesIntegration {
             message = "≈ \(value) \(to) · \(date) · Frankfurter"
         default: throw Calculator.Failure.invalidExpression
         }
+        func finite(_ value: JSONValue) -> Bool {
+            switch value {
+            case .double(let number): return number.isFinite
+            case .array(let values): return values.allSatisfy(finite)
+            case .object(let values): return values.values.allSatisfy(finite)
+            default: return true
+            }
+        }
+        guard finite(.object(data)) else { throw Calculator.Failure.nonFinite }
         return .done(
             ToolOutput(
                 message: message, data: .object(data),

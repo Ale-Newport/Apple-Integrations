@@ -12,9 +12,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         let event = NSAppleEventManager.shared().currentAppleEvent
         if event?.eventID == AEEventID(kAEOpenApplication),
-           event?.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem) {
+            event?.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+                == OSType(keyAELaunchedAsLogInItem)
+        {
             AppDelegate.launchedAsLoginItem = true
         }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+            if let directory = UserDefaults.standard.string(forKey: "JarvisSnapshotDir"), let model = Self.model {
+                Task { @MainActor in
+                    DebugSnapshots.prepareSampleConversation(model)
+                    await DebugSnapshots.run(model: model, directory: directory)
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        #endif
     }
 
     /// Called when the main window first appears: a login-item launch closes it again so Jarvis starts quietly.

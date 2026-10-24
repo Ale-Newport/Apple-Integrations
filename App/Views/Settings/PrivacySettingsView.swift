@@ -33,8 +33,8 @@ struct PrivacySettingsView: View {
                 ).disabled(!model.settings.saveHistory)
                 Text(
                     model.t(
-                        "Optional. Saves up to 500 exchanges locally, including full replies and tool status messages. Raw tool data, API keys and confirmation tokens are excluded. You can search, review and erase them in History. Existing saved exchanges remain until erased.",
-                        "Opcional. Guarda hasta 500 intercambios locales, con respuestas y estados de herramientas. Excluye datos brutos de herramientas, claves y tokens de confirmación. Puedes buscar, revisar y borrar el contenido en Historial. Los intercambios guardados permanecen hasta que los borres."
+                        "Optional. Keeps up to 500 command summaries and 100 local conversations, including full replies and tool status messages. Raw tool data, API keys and confirmation tokens are excluded. You can search, review and erase them in History. Existing saved exchanges remain until erased.",
+                        "Opcional. Guarda hasta 500 resúmenes de comandos y 100 conversaciones locales, con respuestas y estados de herramientas. Excluye datos brutos de herramientas, claves y tokens de confirmación. Puedes buscar, revisar y borrar el contenido en Historial. Los intercambios guardados permanecen hasta que los borres."
                     )
                 ).font(.caption).foregroundStyle(.secondary)
                 Text(

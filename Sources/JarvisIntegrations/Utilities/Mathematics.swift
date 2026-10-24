@@ -9,6 +9,15 @@ indirect enum MathExpression: Sendable {
     case divide(Self, Self)
     case power(Self, Self)
     case function(String, Self)
+    var hasFiniteConstants: Bool {
+        switch self {
+        case .number(let number): return number.isFinite
+        case .x: return true
+        case .add(let a, let b), .multiply(let a, let b), .divide(let a, let b), .power(let a, let b):
+            return a.hasFiniteConstants && b.hasFiniteConstants
+        case .function(_, let argument): return argument.hasFiniteConstants
+        }
+    }
     static func sum(_ a: Self, _ b: Self) -> Self {
         if case .number(0) = a { return b }
         if case .number(0) = b { return a }

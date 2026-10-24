@@ -46,6 +46,29 @@ private actor ConditionNotifications: ConditionNotifying {
     func remove(_ id: String) async { scheduled.remove(id) }
 }
 final class ConditionSchedulerTests: XCTestCase {
+    func testStrictThresholdAndDisabledEvaluationAreNotNotifications() async throws {
+        let loader = ConditionWeather(probability: 60)
+        let weather = WeatherIntegration(cache: WeatherCache(loader: loader))
+        let notifier = ConditionNotifications()
+        let store = ConditionJobStore(url: try file(), weather: weather, notifier: notifier)
+        var strict = job(now, threshold: 60)
+        strict.comparison = "above"
+        try await store.insert(strict)
+        await store.evaluate(now: now, isEnabled: { false })
+        let before = await loader.requests
+        XCTAssertEqual(before, 0)
+        await store.evaluate(now: now)
+        let count = await notifier.calls
+        XCTAssertEqual(count, 0)
+        let jobs = try await store.all()
+        XCTAssertEqual(jobs.first?.status, "condition_not_met")
+        var inclusive = job(now, threshold: 60)
+        inclusive.comparison = "at_least"
+        try await store.insert(inclusive)
+        await store.evaluate(now: now)
+        let after = await notifier.calls
+        XCTAssertEqual(after, 1)
+    }
     private let now = Date(timeIntervalSince1970: 1_792_882_800)
     private func file() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(

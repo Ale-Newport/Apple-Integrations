@@ -32,11 +32,11 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Jarvis uses Apple Events to control Music and Notes when you ask it to play music or manage notes. It never reads or changes anything you did not ask for.</string>
+	<string>Jarvis uses Apple Events for requested actions in Music, Notes, Mail, Messages, Safari, Chrome and system audio. You can allow each application separately.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Jarvis needs access to Calendar to show, create, move and cancel events when you ask it to.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>Jarvis can look up people you mention (for example “meeting with Daniel”) in Contacts. This is optional and only used when you turn it on.</string>
+	<string>Jarvis uses Contacts to find people and read contact details when requested. Creating or changing a contact requires your confirmation.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Alejandro Newport Diaz. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
