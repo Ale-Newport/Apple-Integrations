@@ -19,13 +19,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 SECTIONS = [
     ("music", "Apple Music", "AppleScript to the Music app (Automation permission)."),
+    ("catalog", "Music catalog", "Public Apple iTunes Search API metadata; not subscription playback."),
     ("reminders", "Reminders", "EventKit (Reminders full access)."),
     ("notes", "Notes", "AppleScript to the Notes app (Automation permission)."),
     ("calendar", "Calendar", "EventKit (Calendars full access)."),
     ("clock", "Clock (alarms and timers)", "Apple Shortcuts actions of the Clock app, through shortcuts you create once (see SHORTCUTS_SETUP.md)."),
     ("contacts", "Contacts", "Contacts framework (optional; Contacts permission)."),
     ("weather", "Weather", "Open-Meteo HTTPS API; geocoding by GeoNames; network required."),
-    ("utilities", "Utilities", "Local numeric parser and dimensional unit conversions; no network."),
+    ("utilities", "Utilities", "Local arithmetic, calculus, algebra, statistics, finance and unit conversions; currency quotes use Frankfurter reference rates."),
+    ("system", "macOS", "Public AppKit, IOKit, ScreenCaptureKit and fixed system automation; hardware/TCC limits apply."),
+    ("files", "Files and Finder", "Foundation, PDFKit, ImageIO and fixed ditto arguments, restricted to approved roots."),
+    ("browser", "Safari and Chrome", "Public AppleScript interfaces; fixed DOM reading requires the browser permission."),
+    ("mail", "Mail", "Public Mail AppleScript; sending requires recipient, body and attachment review."),
+    ("messages", "Messages", "Public Messages AppleScript; drafts are held in the Jarvis session, and sending needs confirmation."),
+    ("research", "Web research", "Explicitly configured SearXNG JSON provider."),
+    ("workflows", "Approved Shortcuts and Focus", "User-approved installed Shortcuts; no arbitrary shell or invented third-party APIs."),
+    ("conditions", "Future weather conditions", "Optional signed launch agent with persisted one-shot jobs and UserNotifications."),
+    ("stopwatch", "Jarvis stopwatch", "Private local persisted elapsed time and laps; separate from native Clock."),
     ("jarvis_timers", "Jarvis timers", "Persistent Jarvis notifications; separate from native Clock."),
 ]
 
@@ -92,6 +102,8 @@ def render(tools: list) -> str:
         for tool in group:
             lines += [f"### `{tool['name']}`", "", f"{tool['description']}", ""]
             lines.append(f"* **Effect:** {SAFETY.get(tool['safety'], tool['safety'])}")
+            if tool.get("confirmation_required"):
+                lines.append("* **Confirmation:** required (actual scope is reviewed before execution)")
             for constraint in tool.get("constraints", []):
                 lines.append(f"* **Constraint:** {constraint}")
             lines.append("")

@@ -9,18 +9,57 @@ This page separates **three kinds of evidence**, because they are not equally st
 
 > A mocked test is never counted as a real one. Where something was verified only with a fake, it says so.
 
-## Upgrade verification — 23 October 2026
+## Upgrade verification — 24 October 2026
 
-The current upgrade adds an agent, provider transport, context and integration tests. `swift test` passes **501 tests**:
-112 core, 164 interpreter, 202 integrations and 23 IPC. The full Xcode scheme additionally runs 22 app tests, for
-**523 tests** in total. Debug and Release builds succeed. Source compilation has no warnings; Xcode emits its
-standard metadata-extraction notice because this app has no AppIntents dependency. Tests that create or change app
-data continue to use mocks. A live Open-Meteo HTTPS request for London returned current conditions and seven forecast
-days. The running Debug app also answered IPC ping and successfully ran `utilities.calculate` (428.75 for
-17.5/100*2450) and `weather.forecast` (London, seven days). All 55 tool schemas were exported from the live registry.
-The native UI inspection bridge timed out, so visual inspection of the new settings is not claimed. An experimental
-offscreen render inside the plain XCTest process hit an NSApplication lifecycle conflict and was removed; it is not
-counted as a passing test. New live writes to personal Apple data were not performed. See [UPGRADE.md](UPGRADE.md) for scope and limits.
+The current full Xcode result bundle reports **566 tests: 565 passed, 0 failed, 1 skipped**. The skip is the explicitly
+opt-in live-model test. The Swift package contains 544 tests (112 core, 169 interpreter, 240 integrations, 23 IPC);
+Xcode adds 22 app tests. Results are read from `xcresulttool get test-results summary`: parallel bundle logs can
+interleave, so adjacent text counts are not attributed to a bundle. `scripts/build.sh` now reports the result-bundle totals.
+
+Debug and universal Release builds succeed. Deep/strict code-signature verification passes for the app, embedded CLI and condition agent; the app and agent contain both arm64 and x86_64 slices. The launch-agent BundleProgram resolves inside the packaged app, and Debug rendering/self-test hooks are absent from Release. Application-data mutations use fake scripts/in-memory stores. Source
+compilation has no diagnostics; Xcode can emit its standard AppIntents metadata-extraction notice. Real child-process,
+Unix-socket, temporary-file ZIP/image/text safety and AppleScript compilation tests exercise OS facilities without
+changing personal app data. Scripts compile against the installed Music, Notes, Mail, Messages, Safari and Chrome
+dictionaries; successful compilation alone is not evidence that a live Apple application performed an action.
+
+A separately enabled live-model test **passed in 8.548 seconds** against the already installed local
+`qwen2.5:7b-instruct-q4_K_M` through Ollama. The user request contains no tool names:
+
+> Busca mis recordatorios pendientes para mañana y crea una nota llamada Resumen con todos sus títulos.
+
+The test supplies the full real tool catalog, but permits execution only against two in-memory fixtures. It verifies
+that exactly one note is created and contains both actual synthetic reminder titles, then that the workflow completes.
+No personal reminders/notes are read or modified, no model is downloaded, and user inference settings are not changed.
+Reproduce explicitly with:
+
+```bash
+JARVIS_LIVE_MODEL=qwen2.5:7b-instruct-q4_K_M swift test --filter LiveAgentTests
+```
+
+New coverage includes native function schemas and real tool-message replay, unknown/truncated model response rejection,
+SSE framing/cancellation and safe reply previews, recurrence roundtrips, fresh batch confirmations, contact creation
+confirmation/readback and changed-contact review, recipient validation, Mail attachment byte changes, Messages uncertain
+send deduplication, approved file scopes and symlinks, changed bulk-copy/organization plans, ZIP roundtrips/traversal,
+catalog IDs/order/cache/rate limits, mathematical reference results/non-finite rejection, dated currency validation,
+persisted condition restart/retry/expiry/cancellation/strict thresholds and stopwatch persistence.
+
+Live public read checks: Apple's iTunes Search API returned actual Queen / Bohemian Rhapsody IDs and Apple store
+links. Frankfurter returned a date later than the command's current day; the currency tool now rejects future/stale
+reference dates, and **no current live conversion is claimed** from that response. Earlier actual Open-Meteo and IPC
+checks (23 October: calculator 428.75, London seven-day forecast) remain historical evidence, not new live writes.
+
+The updated Debug app launches in an isolated rendering mode: separate settings/history, IPC and global shortcut off,
+schema-only fixture integrations that cannot execute real tools. It produced 38 PNGs in light/dark appearance. The
+visible Intelligence and Privacy forms were inspected for layout/readability. Offscreen caching does not faithfully
+capture native chat/sidebar layers (missing semantic text/material colors), so those images are **not** accepted as
+complete chat visual verification. Native full-screen/manual interaction of the new features remains unverified.
+The earlier UI automation bridge timed out; it is not counted as a successful check.
+
+The optional condition agent is packaged and signed; restart/offline/notification behavior is tested with injected
+services. It has **not** been registered with launchd or granted notification consent during this upgrade. Brightness,
+screen capture, Contacts writes, Mail/Messages sends, native Clock custom Shortcuts and live reminder section/subtask
+Accessibility operations have not been exercised against personal data. The upgrade's supported alternatives and
+setup requirements are detailed in [UPGRADE.md](UPGRADE.md).
 
 ## 1 · Automated baseline (17 October 2026; 470 tests)
 

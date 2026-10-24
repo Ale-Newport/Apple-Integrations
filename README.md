@@ -1,6 +1,6 @@
 # Jarvis Apple Integrations
 
-A native **macOS app** that controls **Apple Music, Reminders, Notes, Calendar and Clock**, with weather, calculations and persistent Jarvis timers from natural language, in
+A native **macOS app** for **Music, Reminders, Notes, Calendar, Clock, Contacts, Mail, Messages, files and browsers**, with weather, mathematics, macOS controls and an optional model agent, in
 **English and Spanish** — including several actions in one sentence:
 
 > *“Play my Chill playlist and remind me to study at 8 PM.”*  ·  *“Pon mi lista Chill y recuérdame estudiar a las 8 PM.”*
@@ -10,7 +10,7 @@ identifier, a note is read back, playback state is queried. If something cannot 
 permission or a setup step is missing, it says exactly what to do. Nothing is faked and nothing is guessed when a name
 is ambiguous.
 
-* **Swift 6 / SwiftUI**, no third-party runtime dependencies, no telemetry. Local by default; optional configured model and weather requests use the network.
+* **Swift 6 / SwiftUI**, no third-party runtime dependencies, no telemetry. Local by default; optional model inference, weather, catalog, currency and configured research use the network.
 * **Reusable Action Engine** (no UI) with typed tool schemas, validation, permission checks, confirmations for
   deletions, duplicate protection, cancellation and history.
 * **Works offline and without any AI** (deterministic EN/ES parser); enable the **configurable AI agent** (Ollama, llama.cpp or any OpenAI-compatible API) in Settings ▸ Intelligence for iterative workflows and contextual requests. Model proposals pass the same tool validation and permissions.
@@ -50,7 +50,7 @@ Hardened Runtime and is **not** sandboxed (see [docs/PERMISSIONS.md](docs/PERMIS
    exists; they are also in [docs/SHORTCUTS_SETUP.md](docs/SHORTCUTS_SETUP.md). Until then Jarvis tells you it cannot
    create alarms — it never substitutes a reminder.
 
-## Intelligence upgrade (23 October 2026)
+## Intelligence upgrade (24 October 2026)
 
 In **Settings ▸ Intelligence**, enable a model, enter its name and an API base URL, then test the connection.
 For Ollama use `http://localhost:11434/v1`; llama.cpp's compatible server typically uses
@@ -67,11 +67,21 @@ Session context stays in memory and can be disabled or cleared. Explicit aliases
 preferences; Jarvis does not silently learn contacts or sensitive facts. Existing command history remains independently
 controlled in Privacy settings.
 
-New capabilities include verified fuzzy library music search, shuffle/repeat controls, daily/weekly/monthly/yearly
-reminder recurrence, list-first reminder extraction, separate shopping items, conservative reminder follow-ups,
-calendar free-slot/overlap analysis, seven-day Open-Meteo forecasts, numeric expressions and unit conversion.
-**Jarvis timers** use persisted deadlines and macOS notifications, and can be listed, paused, resumed, extended or
-cancelled. They remain separate from native Clock alarms; notification delivery depends on macOS Focus and sleep.
+The agent supports native function calling and JSON-compatible providers, uses actual results for dependent actions,
+and streams ordinary reply text when supported. **136 typed tools** cover fuzzy Music library matching and real Apple
+catalog metadata, playlists, detailed recurrence, reminder batches, Notes folders/merge/restore snapshots, calendar
+free slots/overlaps/alerts/timezones, hourly weather, local calculus/algebra/statistics/finance, reference currency
+quotes, Contacts editing, reviewed Mail/Messages sending, approved-root file operations, Safari/Chrome tab reading,
+SearXNG research and macOS controls. Third-party workspaces open through installed bundle IDs; trusted Shortcuts can
+be explicitly approved as additional workflows and for Focus.
+
+**Settings ▸ Integrations** controls approved file roots and workflows. The optional signed condition agent can
+perform persistent future rain checks and notify with the main app closed; enable it and authorize its notifications
+explicitly. The agent has not been registered during testing. Jarvis timers and stopwatch are separate from native
+Clock. Notification delivery depends on sleep, connectivity and Focus.
+
+History can optionally save bounded conversations and tool-step messages for later reading/search. Privacy settings
+can erase history and original Notes snapshots. Full conversations, inference and background conditions are opt-in.
 
 ```text
 En la lista Compra, añade comprar huevos
@@ -117,7 +127,7 @@ What's on my calendar tomorrow?                Mueve mi reunión del viernes a l
 | | |
 | --- | --- |
 | [docs/COMMANDS.md](docs/COMMANDS.md) | What you can say, per app, with limitations |
-| [docs/TOOLS.md](docs/TOOLS.md) | Reference of all 39 tools (generated from the live registry) |
+| [docs/TOOLS.md](docs/TOOLS.md) | Reference of all 136 tools (generated from the compiled registry) |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Permissions, entitlements, `Info.plist` keys, security design |
 | [docs/SHORTCUTS_SETUP.md](docs/SHORTCUTS_SETUP.md) | Exact manual steps for the Clock shortcuts |
 | [docs/IPC.md](docs/IPC.md) | Local socket protocol and `jarvisctl` |
@@ -129,7 +139,7 @@ What's on my calendar tomorrow?                Mueve mi reunión del viernes a l
 
 ```bash
 scripts/build.sh [Debug|Release]    # xcodebuild with a short digest of errors/warnings
-scripts/test.sh                     # swift test + xcodebuild test (523 tests; app data uses fake integrations)
+scripts/test.sh                     # swift test + xcodebuild test (see docs/TESTING.md for current counts; app data uses fakes)
 scripts/live_tests.py               # real Apple apps; read-only by default (see docs/TESTING.md)
 scripts/gen-tools-doc.py            # regenerates docs/TOOLS.md from the running app
 xcodegen generate                   # regenerates the Xcode project from project.yml
@@ -152,10 +162,13 @@ docs/                documentation
   possible through the Clock actions (Jarvis explains this instead of faking it).
 * **Calendar invitations** cannot be sent or attendees added (Calendar's public API does not allow it); mentioned people
   are written in the event notes.
-* **Repeating reminders** support daily, weekly, monthly and yearly intervals through EventKit, with a first due date. Sections and subtasks are not exposed by the public API and return an explicit limitation before any creation.
-* **Music** plays from your library only (the catalogue search needs MusicKit and a developer token); albums and artists
-  play through a *Jarvis Queue* playlist.
-* **Notes** with attachments or passwords are never edited (new notes work normally).
+* **Repeating reminders** support intervals, weekdays and bounded recurrence through EventKit, with a first due date. Sections and subtasks are not exposed by the public API and return an explicit limitation before any creation.
+* **Music** plays verified library tracks. Public iTunes catalog search provides metadata and store links, not subscription playback. Albums/artists can use a new *Jarvis Queue* playlist without deleting existing user playlists.
+* **Notes** with unsupported attachments or passwords are protected. Supported edits preserve original HTML snapshots; arbitrary rich text cannot always be rewritten losslessly.
+* **Mail/Messages** require explicit recipient/content confirmation; submission is not verified delivery. Messages history is unavailable.
+* **System and files** respect approved roots, public driver support and TCC. Focus needs an approved Shortcut; native screen locking is not fabricated.
+* **Future conditions** need the optional installed agent and notification setup; checks may run 15 minutes late or be delayed by sleep/offline.
+* **Mathematics** supports the declared local methods, not a complete symbolic CAS. Currency data must have a valid recent non-future reference date.
 * The app is not notarized (no Developer ID certificate was available); signing is with your Apple Development identity.
 
 See [docs/TESTING.md](docs/TESTING.md) for the honest list of what has and has not been verified on a real machine.

@@ -151,3 +151,26 @@ shortcuts run "Jarvis Start Timer" --input-path /tmp/timer.json
 * **Timer labels** are accepted but cannot be stored by the Clock action; **changing** an existing alarm's time is not
   offered (delete it and create a new one).
 * Shortcuts run in the background, so a macOS prompt (“Always Allow”) can appear the first time each one runs.
+
+## Approved workflows and Focus
+
+Settings → Integrations can load installed Shortcuts and explicitly approve individual names. This separate allowlist
+is the extension surface for supported third-party actions and native Clock actions outside the built-in contract.
+Jarvis never adds to this list from model output. Each `workflows.run` execution reviews the complete data input and
+reports successful process exit as unverified external effects.
+
+For Focus, create **Jarvis Set Focus** (or change the configured name), approve it, and use the public **Set Focus**
+action available in your Shortcuts installation. Input is JSON:
+
+```json
+{"enabled":true,"mode":"Do Not Disturb","until":"2026-10-24T18:00:00+01:00"}
+```
+
+The Shortcut must select the requested Focus, honor `enabled`, and apply the supplied end date instead of leaving it
+on indefinitely. Action names and selectable Focus parameters vary by macOS release; inspect them in Shortcuts.
+Jarvis validates approval/installation, displays the input for confirmation and submits it; it cannot independently
+query private Focus state. No Focus Shortcut was installed or executed during automated testing.
+
+Persistent rain evaluation uses the separate signed condition agent documented in [UPGRADE.md](UPGRADE.md), rather
+than a timer that pretends to evaluate a future condition. Jarvis stopwatch and notification timers also remain
+separate from native Clock alarms.

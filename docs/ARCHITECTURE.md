@@ -42,6 +42,25 @@ Weather, numeric utilities and persistent Jarvis notification timers are separat
 EventKit handles reminder recurrence and list changes; calendar analysis uses actual observed busy intervals. See
 [UPGRADE.md](UPGRADE.md) for the full capability and platform-limit matrix.
 
+## Native tools, streaming and background work
+
+`NativeToolProposing` maps declared tool names to compatible function names and replays real assistant/tool messages.
+For large registries, discovery selects a small relevant schema set before planning. The JSON adapter remains available.
+The interpreter discards speculative writes after a leading read batch; it replans after actual observations. SSE
+transport bounds wire/text sizes and handles cancellation. Response previews never expose tool arguments as chat text.
+
+`SavedConversation` stores optional bounded user/answer/step messages, not raw tool payloads or confirmation tokens.
+Private command history is capped at 500 summaries and 100 conversations. Notes has a separate bounded original-HTML
+backup store, surfaced through restore tools and Privacy erasure.
+
+`ConditionJobStore` coordinates foreground scheduling and the signed UI-less agent using a private file lock. Locks
+never cross suspension points. launchd starts the agent at 15-minute intervals; leases and stable notification IDs
+bound retries and avoid duplicate delivery. Jobs are typed one-shot weather checks, not persisted arbitrary LLM plans.
+Registration and notification consent are explicit Settings actions. The foreground app is not kept awake by polling.
+
+Files, browsers, communication, system controls, catalog and authorized research are independent `AppIntegration`
+implementations. Workflow execution accepts only configured exact Shortcut names, with reviewed data input.
+
 ## Modules
 
 | Module (Swift package `JarvisKit`) | Contents | Depends on |
@@ -54,8 +73,7 @@ EventKit handles reminder recurrence and list changes; calendar analysis uses ac
 | **App** (Xcode project) | SwiftUI app: composition root, `AppModel`, views, menu bar, Settings, global shortcut | all of the above |
 
 The package products can be embedded in another app (for example the wider Jarvis assistant) *without* the UI. The Xcode
-project (`JarvisAppleIntegrations.xcodeproj`, generated from `project.yml`) holds only the app, the embedded `jarvisctl`
-and the app-level tests.
+project (`JarvisAppleIntegrations.xcodeproj`, generated from `project.yml`) holds the app, embedded `jarvisctl`, the optional signed condition agent and app-level tests.
 
 ## The Action Engine
 
@@ -95,7 +113,7 @@ recent question *of that session* (`ReplyClassifier`). A new non-answer instruct
 Every capability is a `ToolDescriptor` (`name`, `safety` — read-only / modifying / destructive —, typed `parameters`,
 `constraints`, timeout, `deduplicate`, examples). The registry is the single source of truth for validation, for the AI
 prompt, for [TOOLS.md](TOOLS.md) (generated from the live registry) and for the contract test that checks the parser
-against the schemas. 39 tools are registered; their names live in `ToolName`'s static members.
+against the schemas. 136 tools are registered; their names are enumerated by `IntegrationCatalog.builtInToolNames`.
 
 ## Interpreters
 

@@ -13,6 +13,10 @@ reads the TCC database, and never uses private APIs or UI scripting.
 | Reminders | EventKit (`requestFullAccessToReminders`) | Reminders (full access) | `NSRemindersFullAccessUsageDescription` | `com.apple.security.personal-information.calendars` ¹ |
 | Calendar | EventKit (`requestFullAccessToEvents`) | Calendars (full access) | `NSCalendarsFullAccessUsageDescription` | `com.apple.security.personal-information.calendars` |
 | Contacts (optional) | Contacts framework | Contacts | `NSContactsUsageDescription` | `com.apple.security.personal-information.addressbook` |
+| Mail, Messages, Safari, Chrome | Fixed public AppleScript | Automation for each app | `NSAppleEventsUsageDescription` | `com.apple.security.automation.apple-events` |
+| Screenshots | ScreenCaptureKit | Screen Recording consent on use (macOS 14.4+) | – | – |
+| Files | Public file APIs within selected roots | Explicit in-app folder approval; macOS file access still applies | – | – |
+| Timers and future conditions | UserNotifications; optional SMAppService agent | Notifications, plus explicit Login Items approval for the agent | Agent has its own signed application identity | – |
 | Clock | `shortcuts run` | none (Shortcuts may ask *Always Allow* per shortcut) | – | – |
 
 ¹ Hardened Runtime has no separate Reminders entitlement; EventKit access for Reminders and Calendar is covered by the
@@ -74,7 +78,7 @@ every rebuild.
   re-read, the playback state is queried…) and is reported as *verified*, *unverified* (with the reason) or *not
   applicable*. A mocked or unverifiable effect is never reported as verified.
 * **Local only.** The control socket is a Unix-domain socket in your user folder with mode `0600`; the server also
-  checks the peer's user id. There is no TCP listener or telemetry. Optional configured model requests and weather requests use outbound network connections.
+  checks the peer's user id. There is no TCP listener or telemetry. Optional configured model requests and weather/catalog/currency/authorized research use outbound connections.
 * **Private data.** History is a JSON file with mode `0600` in `~/Library/Application Support/JarvisAppleIntegrations/`
   (switchable off, clearable); logs use `os.Logger` with private interpolation, so titles, notes and commands never appear
   in plain text in system logs. Any API key for an optional AI interpreter belongs in the macOS Keychain
@@ -95,3 +99,23 @@ Jarvis notifications, distinct from native Clock alarms, and Focus/sleep/system 
 
 No Accessibility automation, private frameworks, Reminders database writes or arbitrary generated shell commands
 are introduced by the upgrade. See [UPGRADE.md](UPGRADE.md) for the full implementation and limitation matrix.
+
+## Approved capabilities and retained content
+
+Folder selection is an application-level allowlist, not a TCC bypass. Canonical paths and links are checked against
+approved roots; no overwrite is allowed, and large mutations/Trash require review. Browser reading uses fixed code,
+requires the browser developer setting, and checks the expected tab URL to avoid reading a newly navigated page.
+
+Mail sending reviews sender, To/Cc/Bcc, body and readable attachment fingerprints. Messages uses a stable verified
+recipient and consumes its session draft before an uncertain submission. Neither application exposes reliable delivery
+confirmation. Approved Shortcuts can affect other apps; Jarvis reviews the entire provided input before execution.
+
+The optional condition service is registered only through its Settings toggle, and uses a separately signed UI-less
+application for notifications. The user must authorize that application's notifications. Disable the service in Settings
+to stop future evaluation. No live registration was performed during automated verification.
+
+Full conversation saving is off by default; enabling it retains up to 100 bounded conversations plus 500 command
+summaries. Notes edits keep up to 30 private original HTML snapshots with a 30-day restore window; expired versions
+are pruned on access. Privacy settings erase these stores separately. Screenshots are saved privately on disk and are
+not uploaded to the model. Local snapshots/history can contain personal content even though raw tool payloads, stored
+API credentials and confirmation tokens are excluded from conversation records.
