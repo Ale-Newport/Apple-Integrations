@@ -63,7 +63,8 @@ public final class ToolRegistry: Sendable {
 
     /// A JSON description of all supported tools, suitable for embedding in an LLM prompt.
     public func schemaDescription(includeUnsupported: Bool = false) -> JSONValue {
-        let tools: [JSONValue] = descriptors
+        let tools: [JSONValue] =
+            descriptors
             .filter { includeUnsupported || $0.isSupported }
             .map { descriptor in
                 var parameters: JSONObject = [:]
@@ -81,24 +82,38 @@ public final class ToolRegistry: Sendable {
                     "description": .string(descriptor.summary),
                     "safety": .string(descriptor.safety.rawValue),
                     "parameters": .object(parameters),
-                    "input_schema": .object(["type": "object", "additionalProperties": false,
-                        "properties": .object(Dictionary(uniqueKeysWithValues: descriptor.parameters.map { ($0.name, $0.jsonSchema) })),
-                        "required": .array(descriptor.parameters.filter(\.required).map { .string($0.name) })]),
-                    "confirmation_required": .bool(descriptor.safety == .destructive),
+                    "input_schema": .object([
+                        "type": "object", "additionalProperties": false,
+                        "properties": .object(
+                            Dictionary(uniqueKeysWithValues: descriptor.parameters.map { ($0.name, $0.jsonSchema) })),
+                        "required": .array(descriptor.parameters.filter(\.required).map { .string($0.name) }),
+                    ]),
+                    "confirmation_required": .bool(
+                        descriptor.safety == .destructive || descriptor.requiresConfirmation),
                     "availability": .string(descriptor.isSupported ? "supported" : "unsupported"),
                     "reversible": descriptor.safety == .readOnly ? true : .null,
                     "timeout_seconds": .double(descriptor.timeout),
-                    "permissions": .array(integrations.first(where: { $0.id == descriptor.integration })?.permissionRequirements.map { .string($0.id) } ?? []),
-                    "possible_errors": ["validation_failed", "permission_required", "not_found", "unsupported", "timeout", "verification_failed"],
+                    "permissions": .array(
+                        integrations.first(where: { $0.id == descriptor.integration })?.permissionRequirements.map {
+                            .string($0.id)
+                        } ?? []),
+                    "possible_errors": [
+                        "validation_failed", "permission_required", "not_found", "unsupported", "timeout",
+                        "verification_failed",
+                    ],
                 ]
                 if !descriptor.constraints.isEmpty {
-                    object["constraints"] = .array(descriptor.constraints.map { constraint in
-                        switch constraint {
-                        case .atLeastOne(let names): return .string("at least one of: " + names.joined(separator: ", "))
-                        case .exactlyOne(let names): return .string("exactly one of: " + names.joined(separator: ", "))
-                        case .atMostOne(let names): return .string("at most one of: " + names.joined(separator: ", "))
-                        }
-                    })
+                    object["constraints"] = .array(
+                        descriptor.constraints.map { constraint in
+                            switch constraint {
+                            case .atLeastOne(let names):
+                                return .string("at least one of: " + names.joined(separator: ", "))
+                            case .exactlyOne(let names):
+                                return .string("exactly one of: " + names.joined(separator: ", "))
+                            case .atMostOne(let names):
+                                return .string("at most one of: " + names.joined(separator: ", "))
+                            }
+                        })
                 }
                 return .object(object)
             }

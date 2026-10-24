@@ -96,13 +96,16 @@ public struct OSAScriptRunner: AppleScriptExecuting {
         let vector = Self.arguments(for: script, data: arguments)
         let output: ProcessOutput
         do {
-            output = try await processRunner.run(executable: Self.executable, arguments: vector, timeout: timeout, maxOutputBytes: 8 * 1024 * 1024)
+            output = try await processRunner.run(
+                executable: Self.executable, arguments: vector, timeout: timeout, maxOutputBytes: 8 * 1024 * 1024)
         } catch ProcessRunnerError.timedOut {
-            throw AppleScriptFailure(kind: .timeout, code: -1712, message: "The script did not finish within \(Int(timeout)) seconds.")
+            throw AppleScriptFailure(
+                kind: .timeout, code: -1712, message: "The script did not finish within \(Int(timeout)) seconds.")
         } catch ProcessRunnerError.outputTooLarge {
             throw AppleScriptFailure(kind: .scriptError, code: nil, message: "The script produced too much output.")
         } catch ProcessRunnerError.launchFailed(let reason) {
-            throw AppleScriptFailure(kind: .appUnavailable, code: nil, message: "osascript could not be started: \(reason)")
+            throw AppleScriptFailure(
+                kind: .appUnavailable, code: nil, message: "osascript could not be started: \(reason)")
         }
         guard output.status == 0 else { throw Self.failure(from: output.standardError) }
         var text = output.standardOutput
@@ -122,8 +125,11 @@ public struct OSAScriptRunner: AppleScriptExecuting {
             code = Int(token)
             message = String(lastLine[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
         }
-        if let marker = message.range(of: "execution error: ") { message = String(message[marker.upperBound...]) }
-        else if let marker = message.range(of: "syntax error: ") { message = String(message[marker.upperBound...]) }
+        if let marker = message.range(of: "execution error: ") {
+            message = String(message[marker.upperBound...])
+        } else if let marker = message.range(of: "syntax error: ") {
+            message = String(message[marker.upperBound...])
+        }
 
         let kind: AppleScriptFailure.Kind
         switch code {
@@ -161,35 +167,47 @@ public enum ScriptRecords {
 enum ScriptPrelude {
     /// `joinFields({a, b, c})` → a<US>b<US>c ; `joinRecords(rows)` → row<RS>row ; `oneLine(t)` strips separators and line breaks.
     static let handlers = """
-    on joinFields(fieldList)
-    set AppleScript's text item delimiters to (character id 31)
-    set joined to fieldList as text
-    set AppleScript's text item delimiters to ""
-    return joined
-    end joinFields
-    on joinRecords(recordList)
-    set AppleScript's text item delimiters to (character id 30)
-    set joined to recordList as text
-    set AppleScript's text item delimiters to ""
-    return joined
-    end joinRecords
-    on oneLine(v)
-    if v is missing value then return ""
-    set t to v as text
-    repeat with c in {10, 13, 30, 31}
-    set AppleScript's text item delimiters to (character id (contents of c))
-    set parts to text items of t
-    set AppleScript's text item delimiters to " "
-    set t to parts as text
-    end repeat
-    set AppleScript's text item delimiters to ""
-    return t
-    end oneLine
-    on indexOf(needle, haystack)
-    repeat with i from 1 to count of haystack
-    if (item i of haystack) is needle then return i
-    end repeat
-    return 0
-    end indexOf
-    """
+        on joinFields(fieldList)
+        set AppleScript's text item delimiters to (character id 31)
+        set joined to fieldList as text
+        set AppleScript's text item delimiters to ""
+        return joined
+        end joinFields
+        on joinRecords(recordList)
+        set AppleScript's text item delimiters to (character id 30)
+        set joined to recordList as text
+        set AppleScript's text item delimiters to ""
+        return joined
+        end joinRecords
+        on oneLine(v)
+        if v is missing value then return ""
+        set t to v as text
+        repeat with c in {10, 13, 30, 31}
+        set AppleScript's text item delimiters to (character id (contents of c))
+        set parts to text items of t
+        set AppleScript's text item delimiters to " "
+        set t to parts as text
+        end repeat
+        set AppleScript's text item delimiters to ""
+        return t
+        end oneLine
+        on safeText(v)
+        if v is missing value then return ""
+        set t to v as text
+        repeat with c in {30, 31}
+        set AppleScript's text item delimiters to (character id (contents of c))
+        set parts to text items of t
+        set AppleScript's text item delimiters to " "
+        set t to parts as text
+        end repeat
+        set AppleScript's text item delimiters to ""
+        return t
+        end safeText
+        on indexOf(needle, haystack)
+        repeat with i from 1 to count of haystack
+        if (item i of haystack) is needle then return i
+        end repeat
+        return 0
+        end indexOf
+        """
 }

@@ -28,12 +28,16 @@ final class AppModel {
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var recallIndex: Int?
     @ObservationIgnored private var activationObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private let systemDiscoveryEnabled: Bool
 
-    init(environment: AppEnvironment) {
+    init(environment: AppEnvironment, systemDiscoveryEnabled: Bool = true) {
         self.environment = environment
+        self.systemDiscoveryEnabled = systemDiscoveryEnabled
         self.settings = environment.settingsStore.snapshot()
         environment.ipc.apply(enabled: settings.ipcEnabled)
-        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
             Task { @MainActor in self?.refreshStatuses() }
         }
         refreshStatuses()
@@ -65,7 +69,9 @@ final class AppModel {
     }
 
     func binding<Value>(_ keyPath: WritableKeyPath<JarvisSettings, Value>) -> Binding<Value> {
-        Binding(get: { self.settings[keyPath: keyPath] }, set: { newValue in self.update { $0[keyPath: keyPath] = newValue } })
+        Binding(
+            get: { self.settings[keyPath: keyPath] },
+            set: { newValue in self.update { $0[keyPath: keyPath] = newValue } })
     }
 
     // MARK: Commands
@@ -81,7 +87,8 @@ final class AppModel {
 
         let id = UUID()
         messages.append(ChatMessage(id: id, text: text, date: Date(), phase: .interpreting))
-        let request = CommandRequest(text: text, language: nil, source: .app, session: "ui", allowDuplicate: allowDuplicate)
+        let request = CommandRequest(
+            text: text, language: nil, source: .app, session: "ui", allowDuplicate: allowDuplicate)
         let engine = environment.engine
         tasks[id] = Task { [weak self] in
             guard let owner = self else { return }
@@ -100,7 +107,9 @@ final class AppModel {
 
     /// Answers a pending confirmation or clarification with a button.
     func resolve(in message: ChatMessage, token: String, decision: PendingDecision, label: String) {
-        guard let index = messages.firstIndex(where: { $0.id == message.id }), !messages[index].resolvedTokens.contains(token) else { return }
+        guard let index = messages.firstIndex(where: { $0.id == message.id }),
+            !messages[index].resolvedTokens.contains(token)
+        else { return }
         messages[index].resolvedTokens.insert(token)
 
         let id = UUID()
@@ -109,7 +118,8 @@ final class AppModel {
         let language = self.language
         tasks[id] = Task { [weak self] in
             guard let owner = self else { return }
-            let response = await engine.resolve(token: token, decision: decision, language: language, source: .app) { event in
+            let response = await engine.resolve(token: token, decision: decision, language: language, source: .app) {
+                event in
                 Task { @MainActor in owner.apply(event, to: id) }
             }
             owner.finish(id, with: response)
@@ -127,7 +137,9 @@ final class AppModel {
         let language = self.language
         tasks[id] = Task { [weak self] in
             guard let owner = self else { return }
-            let response = await engine.execute(ToolCall(tool: tool), language: language, source: .app, session: "ui", allowDuplicate: true) { event in
+            let response = await engine.execute(
+                ToolCall(tool: tool), language: language, source: .app, session: "ui", allowDuplicate: true
+            ) { event in
                 Task { @MainActor in owner.apply(event, to: id) }
             }
             owner.finish(id, with: response)
@@ -138,13 +150,18 @@ final class AppModel {
         guard let index = messages.firstIndex(where: { $0.id == id }), messages[index].isRunning else { return }
         let registry = environment.registry
         switch event {
+        case .responseText(_, let text): messages[index].partialReply = text
         case .planned(_, let steps):
             let infos = steps.map { step in
-                StepInfo(id: step.id, tool: step.tool, title: registry.descriptor(for: step.tool)?.title ?? step.tool.rawValue, state: .pending)
+                StepInfo(
+                    id: step.id, tool: step.tool,
+                    title: registry.descriptor(for: step.tool)?.title ?? step.tool.rawValue, state: .pending)
             }
             if case .running(let previous) = messages[index].phase {
                 messages[index].phase = .running(previous + infos)
-            } else { messages[index].phase = .running(infos) }
+            } else {
+                messages[index].phase = .running(infos)
+            }
         case .stepStarted(_, let callID):
             update(step: callID, in: index) { $0.state = .running }
         case .stepFinished(_, let result):
@@ -153,7 +170,9 @@ final class AppModel {
     }
 
     private func update(step callID: UUID, in index: Int, _ change: (inout StepInfo) -> Void) {
-        guard case .running(var steps) = messages[index].phase, let position = steps.firstIndex(where: { $0.id == callID }) else { return }
+        guard case .running(var steps) = messages[index].phase,
+            let position = steps.firstIndex(where: { $0.id == callID })
+        else { return }
         change(&steps[position])
         messages[index].phase = .running(steps)
     }
@@ -164,7 +183,8 @@ final class AppModel {
             messages[index].phase = .finished(response)
         }
         refreshHistory()
-        if response.status == .permissionRequired || response.status == .setupRequired || response.status == .completed {
+        if response.status == .permissionRequired || response.status == .setupRequired || response.status == .completed
+        {
             refreshStatuses()
         }
     }
@@ -246,12 +266,15 @@ final class AppModel {
     }
 
     func refreshShortcutPresence() {
+        guard systemDiscoveryEnabled else { return }
         Task {
             do {
                 let installed = try await ShortcutsCLIRunner().installedShortcutNames()
                 var presence: [ClockShortcut: Bool] = [:]
                 let names = settings.shortcutNames
-                for shortcut in ClockShortcut.allCases { presence[shortcut] = installed.contains(shortcut.name(in: names)) }
+                for shortcut in ClockShortcut.allCases {
+                    presence[shortcut] = installed.contains(shortcut.name(in: names))
+                }
                 shortcutPresence = presence
                 shortcutsToolAvailable = true
             } catch {
@@ -268,9 +291,13 @@ final class AppModel {
             let state = await integration.requestAuthorization(for: tool)
             switch state {
             case .authorized:
-                notice = t("Access granted for \(integration.displayName.en).", "Acceso concedido para \(integration.displayName.es).")
+                notice = t(
+                    "Access granted for \(integration.displayName.en).",
+                    "Acceso concedido para \(integration.displayName.es).")
             case .denied, .restricted:
-                notice = t("macOS did not grant access. You can change it in System Settings.", "macOS no concedió el acceso. Puedes cambiarlo en Ajustes del Sistema.")
+                notice = t(
+                    "macOS did not grant access. You can change it in System Settings.",
+                    "macOS no concedió el acceso. Puedes cambiarlo en Ajustes del Sistema.")
             default:
                 notice = nil
             }
@@ -284,7 +311,9 @@ final class AppModel {
     }
 
     func openShortcutsApp() {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.shortcuts") { NSWorkspace.shared.open(url) }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.shortcuts") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: Choices for Settings pickers
@@ -345,18 +374,22 @@ final class AppModel {
                 if !state.isAuthorized {
                     switch state {
                     case .denied, .restricted:
-                        set.problem = language.pick("Access is off. Change it in System Settings ▸ Privacy & Security.", "El acceso está desactivado. Cámbialo en Ajustes del Sistema ▸ Privacidad y seguridad.")
+                        set.problem = language.pick(
+                            "Access is off. Change it in System Settings ▸ Privacy & Security.",
+                            "El acceso está desactivado. Cámbialo en Ajustes del Sistema ▸ Privacidad y seguridad.")
                     case .unavailable(let reason):
                         set.problem = reason.resolved(language)
                     default:
-                        set.problem = language.pick("Allow access first (Permissions tab).", "Concede primero el acceso (pestaña Permisos).")
+                        set.problem = language.pick(
+                            "Allow access first (Permissions tab).", "Concede primero el acceso (pestaña Permisos).")
                     }
                     choices[kind] = set
                     refreshStatuses()
                     return
                 }
             }
-            let response = await engine.execute(ToolCall(tool: tool), language: language, source: .app, session: "settings", recordHistory: false)
+            let response = await engine.execute(
+                ToolCall(tool: tool), language: language, source: .app, session: "settings", recordHistory: false)
             if let result = response.results.first, result.status == .completed {
                 for entry in result.data?[key]?.arrayValue ?? [] {
                     guard let name = entry["name"]?.stringValue else { continue }
@@ -381,7 +414,9 @@ final class AppModel {
 
     /// The global shortcut: shows Jarvis, or hides it again when it is already the frontmost window.
     func toggleMainWindow() {
-        if NSApp.isActive, let window = NSApp.keyWindow, window.identifier?.rawValue.contains("main") == true, window.isVisible {
+        if NSApp.isActive, let window = NSApp.keyWindow, window.identifier?.rawValue.contains("main") == true,
+            window.isVisible
+        {
             NSApp.hide(nil)
         } else {
             selection = .chat
@@ -400,7 +435,9 @@ final class OpenWindowBridge {
         if let open {
             // Re-creates the window if it was closed, or brings the existing one to the front.
             open()
-        } else if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue.contains("main") == true && $0.canBecomeMain }) {
+        } else if let existing = NSApp.windows.first(where: {
+            $0.identifier?.rawValue.contains("main") == true && $0.canBecomeMain
+        }) {
             // Very early at launch, before any view has registered the SwiftUI action.
             existing.makeKeyAndOrderFront(nil)
         }

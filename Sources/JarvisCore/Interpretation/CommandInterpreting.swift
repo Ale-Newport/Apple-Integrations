@@ -13,8 +13,15 @@ public struct InterpretationRequest: Sendable {
     public var conversation: [ConversationTurn] = []
     public var observations: [ToolResult] = []
     public var round = 0
+    /// Successful calls in the current workflow only; used to reuse unchanged read observations.
+    public var executedCalls: [ToolCall] = []
+    /// A cumulative human reply preview; never tool arguments or planning output.
+    public var onText: (@Sendable (String) -> Void)? = nil
 
-    public init(text: String, language: Language, now: Date, calendar: Calendar, settings: JarvisSettings, tools: [ToolDescriptor] = []) {
+    public init(
+        text: String, language: Language, now: Date, calendar: Calendar, settings: JarvisSettings,
+        tools: [ToolDescriptor] = []
+    ) {
         self.text = text
         self.language = language
         self.now = now
@@ -83,6 +90,8 @@ public struct ConversationTurn: Sendable {
     public var results: [ToolResult]
     public var summary: String
     public init(text: String, results: [ToolResult], summary: String) {
-        self.text = text; self.results = results; self.summary = summary
+        self.text = text
+        self.results = results
+        self.summary = summary
     }
 }

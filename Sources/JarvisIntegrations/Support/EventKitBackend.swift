@@ -29,10 +29,11 @@ public actor EventKitBackend: ReminderStoring {
     }
 
     private func request(_ entity: EKEntityType) async throws -> EventKitAccess {
-        _ = switch entity {
-        case .reminder: try await store.requestFullAccessToReminders()
-        default: try await store.requestFullAccessToEvents()
-        }
+        _ =
+            switch entity {
+            case .reminder: try await store.requestFullAccessToReminders()
+            default: try await store.requestFullAccessToEvents()
+            }
         // After the user answers, the store must reload its sources to see the data.
         store.reset()
         return entityAccess(entity)
@@ -60,7 +61,8 @@ public actor EventKitBackend: ReminderStoring {
             ReminderListInfo(
                 id: calendar.calendarIdentifier, title: calendar.title,
                 sourceID: calendar.source?.sourceIdentifier ?? "", sourceName: calendar.source?.title ?? "",
-                allowsModifications: calendar.allowsContentModifications, isDefault: calendar.calendarIdentifier == defaultID
+                allowsModifications: calendar.allowsContentModifications,
+                isDefault: calendar.calendarIdentifier == defaultID
             )
         }
     }
@@ -70,7 +72,8 @@ public actor EventKitBackend: ReminderStoring {
         let list = EKCalendar(for: .reminder, eventStore: store)
         list.title = title
         let sources = store.sources
-        let source = sources.first { $0.sourceIdentifier == preferredSourceID }
+        let source =
+            sources.first { $0.sourceIdentifier == preferredSourceID }
             ?? store.defaultCalendarForNewReminders()?.source
             ?? sources.first { $0.sourceType == .calDAV }
             ?? sources.first { $0.sourceType == .local }
@@ -89,17 +92,25 @@ public actor EventKitBackend: ReminderStoring {
 
     func renameList(id: String, title: String) async throws {
         try requireReminders()
-        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else { throw EventKitFailure.notFound }
+        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else {
+            throw EventKitFailure.notFound
+        }
         guard list.allowsContentModifications else { throw EventKitFailure.readOnly(list.title) }
         list.title = title
-        do { try store.saveCalendar(list, commit: true) } catch { throw EventKitFailure.saveFailed(error.localizedDescription) }
+        do { try store.saveCalendar(list, commit: true) } catch {
+            throw EventKitFailure.saveFailed(error.localizedDescription)
+        }
     }
 
     func deleteList(id: String) async throws {
         try requireReminders()
-        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else { throw EventKitFailure.notFound }
+        guard let list = store.calendar(withIdentifier: id), list.allowedEntityTypes.contains(.reminder) else {
+            throw EventKitFailure.notFound
+        }
         guard list.allowsContentModifications else { throw EventKitFailure.readOnly(list.title) }
-        do { try store.removeCalendar(list, commit: true) } catch { throw EventKitFailure.saveFailed(error.localizedDescription) }
+        do { try store.removeCalendar(list, commit: true) } catch {
+            throw EventKitFailure.saveFailed(error.localizedDescription)
+        }
     }
 
     func reminders(in listIDs: [String]?, calendar: Calendar) async throws -> [ReminderInfo] {
@@ -134,7 +145,7 @@ public actor EventKitBackend: ReminderStoring {
         reminder.priority = draft.priority
         Self.apply(due: draft.due, to: reminder, calendar: calendar)
         if let recurrence = draft.recurrence {
-            reminder.addRecurrenceRule(Self.recurrenceRule(recurrence))
+            reminder.addRecurrenceRule(draft.recurrenceDetails?.rule ?? Self.recurrenceRule(recurrence))
             reminder.startDateComponents = reminder.dueDateComponents
         }
         do {
@@ -147,14 +158,18 @@ public actor EventKitBackend: ReminderStoring {
 
     func update(id: String, changes: ReminderChanges, calendar: Calendar) async throws -> ReminderInfo {
         try requireReminders()
-        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { throw EventKitFailure.notFound }
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw EventKitFailure.notFound
+        }
         if let title = changes.title { reminder.title = title }
         if let notes = changes.notes { reminder.notes = notes }
         if let priority = changes.priority { reminder.priority = priority }
         if let completed = changes.completed { reminder.isCompleted = completed }
         if let recurrence = changes.recurrence {
             for rule in reminder.recurrenceRules ?? [] { reminder.removeRecurrenceRule(rule) }
-            if recurrence != "none" { reminder.addRecurrenceRule(Self.recurrenceRule(recurrence)) }
+            if recurrence != "none" {
+                reminder.addRecurrenceRule(changes.recurrenceDetails?.rule ?? Self.recurrenceRule(recurrence))
+            }
         }
         if changes.clearDue {
             reminder.dueDateComponents = nil
@@ -178,7 +193,9 @@ public actor EventKitBackend: ReminderStoring {
 
     func delete(id: String) async throws {
         try requireReminders()
-        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { throw EventKitFailure.notFound }
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw EventKitFailure.notFound
+        }
         do {
             try store.remove(reminder, commit: true)
         } catch {
@@ -187,9 +204,10 @@ public actor EventKitBackend: ReminderStoring {
     }
 
     private static func recurrenceRule(_ name: String) -> EKRecurrenceRule {
-        let frequency: EKRecurrenceFrequency
-        switch name { case "daily": frequency = .daily; case "monthly": frequency = .monthly; case "yearly": frequency = .yearly; default: frequency = .weekly }
-        return EKRecurrenceRule(recurrenceWith: frequency, interval: 1, end: nil)
+        RecurrenceSpecification(
+            frequency: ["weekdays", "weekends"].contains(name) ? "weekly" : name,
+            weekdays: name == "weekdays" ? [1, 2, 3, 4, 5] : name == "weekends" ? [6, 7] : []
+        ).rule
     }
 
     private static func apply(due: DueSpec?, to reminder: EKReminder, calendar: Calendar) {
@@ -222,9 +240,8 @@ public actor EventKitBackend: ReminderStoring {
             sourceName: reminder.calendar?.source?.title ?? "", isCompleted: reminder.isCompleted,
             completionDate: reminder.completionDate, due: due, dueHasTime: hasTime, priority: reminder.priority,
             hasAlarm: reminder.hasAlarms, creationDate: reminder.creationDate,
-            recurrence: reminder.recurrenceRules?.first.map { rule in
-                switch rule.frequency { case .daily: return "daily"; case .weekly: return "weekly"; case .monthly: return "monthly"; case .yearly: return "yearly"; @unknown default: return "unknown" }
-            }
+            recurrence: reminder.recurrenceRules?.first.map { RecurrenceSpecification(rule: $0).simpleName },
+            recurrenceDetails: reminder.recurrenceRules?.first.map(RecurrenceSpecification.init(rule:))
         )
     }
 
@@ -240,8 +257,10 @@ public actor EventKitBackend: ReminderStoring {
         return store.calendars(for: .event).map { calendar in
             CalendarInfo(
                 id: calendar.calendarIdentifier, title: calendar.title, sourceName: calendar.source?.title ?? "",
-                sourceType: Self.sourceTypeName(calendar.source?.sourceType), allowsModifications: calendar.allowsContentModifications,
-                isSubscribed: calendar.type == .subscription || calendar.type == .birthday, isDefault: calendar.calendarIdentifier == defaultID
+                sourceType: Self.sourceTypeName(calendar.source?.sourceType),
+                allowsModifications: calendar.allowsContentModifications,
+                isSubscribed: calendar.type == .subscription || calendar.type == .birthday,
+                isDefault: calendar.calendarIdentifier == defaultID
             )
         }
     }
@@ -264,8 +283,11 @@ public actor EventKitBackend: ReminderStoring {
             return store.event(withIdentifier: id)
         }
         let start = Date(timeIntervalSince1970: stamp)
-        let predicate = store.predicateForEvents(withStart: start.addingTimeInterval(-86_400), end: start.addingTimeInterval(86_400 * 2), calendars: nil)
-        return store.events(matching: predicate).first { $0.eventIdentifier == parts[0] && abs($0.startDate.timeIntervalSince(start)) < 1 }
+        let predicate = store.predicateForEvents(
+            withStart: start.addingTimeInterval(-86_400), end: start.addingTimeInterval(86_400 * 2), calendars: nil)
+        return store.events(matching: predicate).first {
+            $0.eventIdentifier == parts[0] && abs($0.startDate.timeIntervalSince(start)) < 1
+        }
     }
 
     fileprivate func eventByID(_ id: String) throws -> EventInfo? {
@@ -284,7 +306,11 @@ public actor EventKitBackend: ReminderStoring {
         event.endDate = draft.end
         event.location = draft.location
         event.notes = draft.notes
-        if let minutes = draft.alertMinutesBefore { event.addAlarm(EKAlarm(relativeOffset: -TimeInterval(minutes) * 60)) }
+        if let zone = draft.timeZoneID { event.timeZone = TimeZone(identifier: zone) }
+        if let rule = draft.recurrence { event.addRecurrenceRule(rule.rule) }
+        if let minutes = draft.alertMinutesBefore {
+            event.addAlarm(EKAlarm(relativeOffset: -TimeInterval(minutes) * 60))
+        }
         do {
             try store.save(event, span: .thisEvent, commit: true)
         } catch {
@@ -295,6 +321,12 @@ public actor EventKitBackend: ReminderStoring {
 
     fileprivate func updateEvent(id: String, changes: EventChanges) throws -> EventInfo {
         guard let event = try findEvent(id: id) else { throw EventKitFailure.notFound }
+        if let zone = changes.timeZoneID { event.timeZone = TimeZone(identifier: zone) }
+        if let allDay = changes.isAllDay { event.isAllDay = allDay }
+        if changes.clearAlerts || changes.alertMinutesBefore != nil {
+            for alarm in event.alarms ?? [] { event.removeAlarm(alarm) }
+        }
+        if let minutes = changes.alertMinutesBefore { event.addAlarm(EKAlarm(relativeOffset: -Double(minutes) * 60)) }
         if let title = changes.title { event.title = title }
         if let start = changes.start { event.startDate = start }
         if let end = changes.end { event.endDate = end }
@@ -326,12 +358,18 @@ public actor EventKitBackend: ReminderStoring {
     private static func info(_ event: EKEvent) -> EventInfo {
         let me = event.attendees?.first { $0.isCurrentUser }
         return EventInfo(
-            id: "\(event.eventIdentifier ?? "")|\(Int(event.startDate.timeIntervalSince1970))", title: event.title ?? "",
-            start: event.startDate, end: event.endDate, isAllDay: event.isAllDay, location: event.location, notes: event.notes,
+            id: "\(event.eventIdentifier ?? "")|\(Int(event.startDate.timeIntervalSince1970))",
+            title: event.title ?? "",
+            start: event.startDate, end: event.endDate, isAllDay: event.isAllDay, location: event.location,
+            notes: event.notes,
             calendarID: event.calendar?.calendarIdentifier ?? "", calendarTitle: event.calendar?.title ?? "",
             sourceName: event.calendar?.source?.title ?? "", isRecurring: event.hasRecurrenceRules || event.isDetached,
             hasAttendees: event.hasAttendees, isBusy: event.availability != .free,
-            isDeclined: me?.participantStatus == .declined, canModify: event.calendar?.allowsContentModifications ?? false
+            isDeclined: me?.participantStatus == .declined,
+            canModify: event.calendar?.allowsContentModifications ?? false,
+            recurrence: event.recurrenceRules?.first.map(RecurrenceSpecification.init(rule:)),
+            alertMinutes: (event.alarms ?? []).filter { $0.absoluteDate == nil }.map { Int(-$0.relativeOffset / 60) },
+            timeZoneID: event.timeZone?.identifier
         )
     }
 
@@ -355,9 +393,13 @@ struct CalendarFacade: EventStoring {
     func access() async -> EventKitAccess { await backend.calendarAccess() }
     func requestAccess() async throws -> EventKitAccess { try await backend.requestCalendarAccess() }
     func calendars() async throws -> [CalendarInfo] { try await backend.allCalendars() }
-    func events(from start: Date, to end: Date, calendarIDs: [String]?) async throws -> [EventInfo] { try await backend.eventsBetween(start, end, calendarIDs: calendarIDs) }
+    func events(from start: Date, to end: Date, calendarIDs: [String]?) async throws -> [EventInfo] {
+        try await backend.eventsBetween(start, end, calendarIDs: calendarIDs)
+    }
     func event(id: String) async throws -> EventInfo? { try await backend.eventByID(id) }
     func create(_ draft: EventDraft) async throws -> EventInfo { try await backend.createEvent(draft) }
-    func update(id: String, changes: EventChanges) async throws -> EventInfo { try await backend.updateEvent(id: id, changes: changes) }
+    func update(id: String, changes: EventChanges) async throws -> EventInfo {
+        try await backend.updateEvent(id: id, changes: changes)
+    }
     func delete(id: String) async throws { try await backend.deleteEvent(id: id) }
 }

@@ -42,7 +42,19 @@ targets:
         excludes:
           - Resources/Info.plist
           - Resources/JarvisAppleIntegrations.entitlements
+          - Resources/LaunchAgents/**
+      - path: App/Resources/LaunchAgents/com.alejandronewport.JarvisAppleIntegrations.conditions.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     dependencies:
+      - target: JarvisConditionAgent
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/LoginItems
       - package: JarvisKit
         product: JarvisCore
       - package: JarvisKit
@@ -63,6 +75,25 @@ targets:
         INFOPLIST_FILE: App/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Resources/JarvisAppleIntegrations.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  JarvisConditionAgent:
+    type: application
+    platform: macOS
+    sources:
+      - path: Agent
+        excludes: [Info.plist]
+    dependencies:
+      - package: JarvisKit
+        product: JarvisCore
+      - package: JarvisKit
+        product: JarvisIntegrations
+    settings:
+      base:
+        PRODUCT_NAME: Jarvis Condition Agent
+        PRODUCT_BUNDLE_IDENTIFIER: com.alejandronewport.JarvisAppleIntegrations.ConditionAgent
+        INFOPLIST_FILE: Agent/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        SKIP_INSTALL: YES
 
   jarvisctl:
     type: tool

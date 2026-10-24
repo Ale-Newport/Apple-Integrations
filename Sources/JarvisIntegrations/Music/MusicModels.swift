@@ -12,8 +12,13 @@ struct MusicTrack: Sendable, Hashable {
     var discNumber: Int
     var trackNumber: Int
     var year: Int
+    var genre: String = ""
+    var playCount: Int = 0
 
-    init(id: String, name: String, artist: String, album: String, duration: Int = 0, cloudStatus: String = "", kind: String = "", discNumber: Int = 0, trackNumber: Int = 0, year: Int = 0) {
+    init(
+        id: String, name: String, artist: String, album: String, duration: Int = 0, cloudStatus: String = "",
+        kind: String = "", discNumber: Int = 0, trackNumber: Int = 0, year: Int = 0
+    ) {
         self.id = id
         self.name = name
         self.artist = artist
@@ -31,14 +36,18 @@ struct MusicTrack: Sendable, Hashable {
         guard f.count >= 7, !f[0].isEmpty else { return nil }
         self.init(
             id: f[0], name: f[1], artist: f[2], album: f[3], duration: Int(f[4]) ?? 0, cloudStatus: f[5], kind: f[6],
-            discNumber: f.count > 7 ? Int(f[7]) ?? 0 : 0, trackNumber: f.count > 8 ? Int(f[8]) ?? 0 : 0, year: f.count > 9 ? Int(f[9]) ?? 0 : 0
+            discNumber: f.count > 7 ? Int(f[7]) ?? 0 : 0, trackNumber: f.count > 8 ? Int(f[8]) ?? 0 : 0,
+            year: f.count > 9 ? Int(f[9]) ?? 0 : 0
         )
+        genre = f.count > 10 ? f[10] : ""
+        playCount = f.count > 11 ? Int(f[11]) ?? 0 : 0
     }
 
     var json: JSONValue {
         .object([
             "id": .string(id), "name": .string(name), "artist": .string(artist), "album": .string(album),
-            "duration_seconds": .int(duration),
+            "duration_seconds": .int(duration), "year": .int(year), "genre": .string(genre),
+            "disc_number": .int(discNumber), "track_number": .int(trackNumber), "library_play_count": .int(playCount),
         ])
     }
 
@@ -66,7 +75,12 @@ struct MusicState: Sendable, Equatable {
         shuffle = f[2] == "true"
         repeatMode = f[3]
         position = Int(f[4]) ?? 0
-        track = f[5].isEmpty ? nil : MusicTrack(id: f[5], name: f[6], artist: f[7], album: f[8], duration: Int(f[9]) ?? 0, cloudStatus: f[10], kind: f[11])
+        track =
+            f[5].isEmpty
+            ? nil
+            : MusicTrack(
+                id: f[5], name: f[6], artist: f[7], album: f[8], duration: Int(f[9]) ?? 0, cloudStatus: f[10],
+                kind: f[11])
     }
 
     init?(row: String) { self.init(fields: ScriptRecords.fields(row)) }
@@ -95,14 +109,22 @@ struct MusicPlaylist: Sendable, Hashable {
 
     init?(fields f: [String]) {
         guard f.count >= 6, !f[0].isEmpty else { return nil }
-        id = f[0]; name = f[1]; specialKind = f[2]; isSmart = f[3] == "true"; trackCount = Int(f[4]) ?? 0; parent = f[5]
+        id = f[0]
+        name = f[1]
+        specialKind = f[2]
+        isSmart = f[3] == "true"
+        trackCount = Int(f[4]) ?? 0
+        parent = f[5]
     }
 
     /// Folder playlists and system playlists (Library, Music, Purchased…) cannot be played by name.
     var isPlayable: Bool { specialKind == "none" }
 
     var json: JSONValue {
-        .object(["id": .string(id), "name": .string(name), "smart": .bool(isSmart), "track_count": .int(trackCount), "folder": parent.isEmpty ? .null : .string(parent)])
+        .object([
+            "id": .string(id), "name": .string(name), "smart": .bool(isSmart), "track_count": .int(trackCount),
+            "folder": parent.isEmpty ? .null : .string(parent),
+        ])
     }
 }
 

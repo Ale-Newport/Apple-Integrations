@@ -1,17 +1,28 @@
-import XCTest
 import JarvisCore
+import XCTest
+
 @testable import JarvisIntegrations
 
 private enum NFx {
-    static func folder(_ account: String, _ accountName: String, _ id: String, _ name: String, count: Int = 3, defaultFolder: Bool = false, defaultAccount: Bool = false) -> String {
-        Rec.fields(account, accountName, id, name, String(count), defaultFolder ? "true" : "false", defaultAccount ? "true" : "false")
+    static func folder(
+        _ account: String, _ accountName: String, _ id: String, _ name: String, count: Int = 3,
+        defaultFolder: Bool = false, defaultAccount: Bool = false
+    ) -> String {
+        Rec.fields(
+            account, accountName, id, name, String(count), defaultFolder ? "true" : "false",
+            defaultAccount ? "true" : "false")
     }
 
-    static func note(_ account: String, _ accountName: String, _ folderID: String, _ folderName: String, _ id: String, _ title: String, modified: String = "2026-10-10T09:30:00", locked: Bool = false) -> String {
+    static func note(
+        _ account: String, _ accountName: String, _ folderID: String, _ folderName: String, _ id: String,
+        _ title: String, modified: String = "2026-10-10T09:30:00", locked: Bool = false
+    ) -> String {
         Rec.fields(account, accountName, folderID, folderName, id, title, modified, locked ? "true" : "false")
     }
 
-    static func raw(id: String, title: String, text: String, html: String, locked: Bool = false, attachments: Int = 0) -> String {
+    static func raw(id: String, title: String, text: String, html: String, locked: Bool = false, attachments: Int = 0)
+        -> String
+    {
         Rec.records([Rec.fields(id, title, locked ? "true" : "false", "false", String(attachments), text), html])
     }
 
@@ -38,9 +49,14 @@ final class NotesIntegrationTests: XCTestCase {
     func testCreateNoteInTheDefaultAccountVerifiesWhatWasStored() async throws {
         installFolders()
         scripts.on(NotesScripts.create, returns: Rec.fields("note-1", "Project Ideas", "2026-10-17T13:00:00"))
-        scripts.on(NotesScripts.raw, returns: NFx.raw(id: "note-1", title: "Project Ideas", text: "Project Ideas\nBuild a robot\nAdd lasers", html: "<div><h1>Project Ideas</h1></div>"))
+        scripts.on(
+            NotesScripts.raw,
+            returns: NFx.raw(
+                id: "note-1", title: "Project Ideas", text: "Project Ideas\nBuild a robot\nAdd lasers",
+                html: "<div><h1>Project Ideas</h1></div>"))
 
-        let outcome = try await registry().run(.notesCreate, ["title": "Project Ideas", "content": "Build a robot\nAdd lasers"])
+        let outcome = try await registry().run(
+            .notesCreate, ["title": "Project Ideas", "content": "Build a robot\nAdd lasers"])
         let output = try XCTUnwrap(outcome.output)
         XCTAssertEqual(output.message, "Created the note “Project Ideas” in iCloud › Notes.")
         XCTAssertTrue(output.verification.isVerified)
@@ -48,13 +64,16 @@ final class NotesIntegrationTests: XCTestCase {
         let call = try XCTUnwrap(scripts.calls(to: NotesScripts.create).first)
         XCTAssertEqual(call.arguments[0], "acc-icloud")
         XCTAssertEqual(call.arguments[1], "f-icloud-notes")
-        XCTAssertEqual(call.arguments[2], "<div><h1>Project Ideas</h1></div><div>Build a robot</div><div>Add lasers</div>")
+        XCTAssertEqual(
+            call.arguments[2], "<div><h1>Project Ideas</h1></div><div>Build a robot</div><div>Add lasers</div>")
     }
 
     func testNoteTextIsEscapedSoItCanNeverBecomeMarkup() async throws {
         installFolders()
         scripts.on(NotesScripts.create, returns: Rec.fields("n", "x", "2026-10-17T13:00:00"))
-        scripts.on(NotesScripts.raw, returns: NFx.raw(id: "n", title: "x", text: "x <script>alert(1)</script> & more", html: ""))
+        scripts.on(
+            NotesScripts.raw,
+            returns: NFx.raw(id: "n", title: "x", text: "x <script>alert(1)</script> & more", html: ""))
         _ = try await registry().run(.notesCreate, ["title": "x", "content": "<script>alert(1)</script> & more"])
         let html = try XCTUnwrap(scripts.calls(to: NotesScripts.create).first?.arguments[2])
         XCTAssertTrue(html.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; more"))
@@ -89,7 +108,9 @@ final class NotesIntegrationTests: XCTestCase {
         let option = try XCTUnwrap(first.clarification?.options[1])
         let done = try await registry().run(.notesCreate, option.call.arguments)
         XCTAssertEqual(done.output?.data?["account"], "Gmail")
-        XCTAssertEqual(scripts.calls(to: NotesScripts.create).first?.arguments.prefix(2).map { $0 }, ["acc-gmail", "f-gmail-notes"])
+        XCTAssertEqual(
+            scripts.calls(to: NotesScripts.create).first?.arguments.prefix(2).map { $0 },
+            ["acc-gmail", "f-gmail-notes"])
     }
 
     func testAccountNarrowsTheFolderChoice() async throws {
@@ -134,18 +155,33 @@ final class NotesIntegrationTests: XCTestCase {
     // MARK: Search, list, folders
 
     private func installNotes() {
-        scripts.on(NotesScripts.notes, returns: Rec.records([
-            NFx.note("acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n1", "Budget 2026", modified: "2026-10-12T10:00:00"),
-            NFx.note("acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n2", "Shopping list", modified: "2026-10-14T10:00:00"),
-            NFx.note("acc-icloud", "iCloud", "f-icloud-work", "Work", "n3", "Project Ideas", modified: "2026-10-16T10:00:00"),
-            NFx.note("acc-gmail", "Gmail", "f-gmail-notes", "Notes", "n4", "Project Ideas", modified: "2026-10-01T10:00:00"),
-            NFx.note("acc-icloud", "iCloud", "f-icloud-trash", "Recently Deleted", "n5", "Old budget", modified: "2026-09-01T10:00:00"),
-            NFx.note("acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n6", "Secret", modified: "2026-10-02T10:00:00", locked: true),
-        ]))
+        scripts.on(
+            NotesScripts.notes,
+            returns: Rec.records([
+                NFx.note(
+                    "acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n1", "Budget 2026",
+                    modified: "2026-10-12T10:00:00"),
+                NFx.note(
+                    "acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n2", "Shopping list",
+                    modified: "2026-10-14T10:00:00"),
+                NFx.note(
+                    "acc-icloud", "iCloud", "f-icloud-work", "Work", "n3", "Project Ideas",
+                    modified: "2026-10-16T10:00:00"),
+                NFx.note(
+                    "acc-gmail", "Gmail", "f-gmail-notes", "Notes", "n4", "Project Ideas",
+                    modified: "2026-10-01T10:00:00"),
+                NFx.note(
+                    "acc-icloud", "iCloud", "f-icloud-trash", "Recently Deleted", "n5", "Old budget",
+                    modified: "2026-09-01T10:00:00"),
+                NFx.note(
+                    "acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n6", "Secret", modified: "2026-10-02T10:00:00",
+                    locked: true),
+            ]))
     }
 
     func testSearchByTitleIgnoresCaseAccentsAndTheTrash() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.bodySearch, returns: "")
         let outcome = try await registry().run(.notesSearch, ["query": "BUDGET", "scope": "title"])
         let ids = outcome.output?.data?["results"]?.arrayValue?.compactMap { $0["id"]?.stringValue }
@@ -154,16 +190,23 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testSearchAlsoFindsTextInsideNotesAndSortsNewestFirst() async throws {
-        installFolders(); installNotes()
-        scripts.on(NotesScripts.bodySearch, returns: NFx.note("acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n2", "Shopping list", modified: "2026-10-14T10:00:00"))
+        installFolders()
+        installNotes()
+        scripts.on(
+            NotesScripts.bodySearch,
+            returns: NFx.note(
+                "acc-icloud", "iCloud", "f-icloud-notes", "Notes", "n2", "Shopping list",
+                modified: "2026-10-14T10:00:00"))
         let outcome = try await registry().run(.notesSearch, ["query": "milk"])
         XCTAssertEqual(outcome.output?.data?["results"]?.arrayValue?.compactMap { $0["id"]?.stringValue }, ["n2"])
         XCTAssertEqual(scripts.calls(to: NotesScripts.bodySearch).first?.arguments, ["milk"])
     }
 
     func testBodySearchFailureDegradesToTitlesWithAWarning() async throws {
-        installFolders(); installNotes()
-        scripts.on(NotesScripts.bodySearch, failsWith: AppleScriptFailure(kind: .timeout, code: -1712, message: "timed out"))
+        installFolders()
+        installNotes()
+        scripts.on(
+            NotesScripts.bodySearch, failsWith: AppleScriptFailure(kind: .timeout, code: -1712, message: "timed out"))
         let outcome = try await registry().run(.notesSearch, ["query": "budget"])
         let output = try XCTUnwrap(outcome.output)
         XCTAssertEqual(output.data?["count"], 1)
@@ -171,7 +214,8 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testListShowsNewestFirstAndFlagsLockedNotes() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         let outcome = try await registry().run(.notesList, [:])
         let message = try XCTUnwrap(outcome.output).message
         XCTAssertTrue(message.contains("Project Ideas — iCloud › Work"))
@@ -193,14 +237,19 @@ final class NotesIntegrationTests: XCTestCase {
     // MARK: Read
 
     func testReadByTitleFindsTheNewestExactMatchOrAsks() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         // "Project Ideas" exists in two accounts → ambiguous.
         let ask = try await registry().run(.notesRead, ["title": "Project Ideas"])
         let clarification = try XCTUnwrap(ask.clarification)
         XCTAssertEqual(clarification.options.map(\.detail), ["iCloud › Work", "Gmail › Notes"])
         XCTAssertEqual(clarification.options[0].call.arguments["id"], "n3")
 
-        scripts.on(NotesScripts.read, returns: Rec.fields("n3", "Project Ideas", "2026-01-01T09:00:00", "2026-10-16T10:00:00", "false", "false", "0", "21", "Project Ideas\nBuild a robot"))
+        scripts.on(
+            NotesScripts.read,
+            returns: Rec.fields(
+                "n3", "Project Ideas", "2026-01-01T09:00:00", "2026-10-16T10:00:00", "false", "false", "0", "21",
+                "Project Ideas\nBuild a robot"))
         let read = try await registry().run(.notesRead, clarification.options[0].call.arguments)
         let output = try XCTUnwrap(read.output)
         XCTAssertTrue(output.message.contains("Build a robot"))
@@ -208,8 +257,13 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testReadingATruncatedNoteSaysSo() async throws {
-        installFolders(); installNotes()
-        scripts.on(NotesScripts.read, returns: Rec.fields("n1", "Budget 2026", "2026-01-01T09:00:00", "2026-10-12T10:00:00", "false", "false", "0", "5000", "First 10 chars"))
+        installFolders()
+        installNotes()
+        scripts.on(
+            NotesScripts.read,
+            returns: Rec.fields(
+                "n1", "Budget 2026", "2026-01-01T09:00:00", "2026-10-12T10:00:00", "false", "false", "0", "5000",
+                "First 10 chars"))
         let outcome = try await registry().run(.notesRead, ["title": "Budget 2026", "max_chars": 100])
         XCTAssertEqual(outcome.output?.data?["truncated"], true)
         XCTAssertTrue(try XCTUnwrap(outcome.output).message.contains("first 14 of 5000"))
@@ -217,8 +271,12 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testLockedNotesCannotBeRead() async throws {
-        installFolders(); installNotes()
-        scripts.on(NotesScripts.read, returns: Rec.fields("n6", "Secret", "2026-01-01T09:00:00", "2026-10-02T10:00:00", "true", "false", "0", "0", ""))
+        installFolders()
+        installNotes()
+        scripts.on(
+            NotesScripts.read,
+            returns: Rec.fields(
+                "n6", "Secret", "2026-01-01T09:00:00", "2026-10-02T10:00:00", "true", "false", "0", "0", ""))
         do {
             _ = try await registry().run(.notesRead, ["title": "Secret"])
             XCTFail("should have thrown")
@@ -228,7 +286,8 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testMissingNoteSuggestsSimilarOnes() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         do {
             _ = try await registry().run(.notesRead, ["title": "Budget plans"])
             XCTFail("a note that does not exist must not be read")
@@ -243,28 +302,34 @@ final class NotesIntegrationTests: XCTestCase {
     // MARK: Append
 
     func testAppendPreservesTheExistingHTMLAndVerifies() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         let originalHTML = "<div><h1>Project Ideas</h1></div><div>Build a robot</div>"
         scripts.on(NotesScripts.raw) { _, index in
             index == 0
                 ? NFx.raw(id: "n3", title: "Project Ideas", text: "Project Ideas\nBuild a robot", html: originalHTML)
-                : NFx.raw(id: "n3", title: "Project Ideas", text: "Project Ideas\nBuild a robot\nMore text here", html: originalHTML + "<div>More text here</div>")
+                : NFx.raw(
+                    id: "n3", title: "Project Ideas", text: "Project Ideas\nBuild a robot\nMore text here",
+                    html: originalHTML + "<div>More text here</div>")
         }
         scripts.on(NotesScripts.setBody, returns: "n3")
 
         let outcome = try await registry().run(.notesAppend, ["id": "n3", "text": "More text here"])
         XCTAssertTrue(try XCTUnwrap(outcome.output).verification.isVerified)
         let setCall = try XCTUnwrap(scripts.calls(to: NotesScripts.setBody).first)
-        XCTAssertEqual(setCall.arguments, ["n3", originalHTML + "<div>More text here</div>"], "existing markup is kept byte for byte")
+        XCTAssertEqual(
+            setCall.arguments, ["n3", originalHTML + "<div>More text here</div>", originalHTML],
+            "existing markup is kept byte for byte")
     }
 
     func testAppendIsRolledBackWhenTheNoteDoesNotLookRight() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         let originalHTML = "<div><h1>Project Ideas</h1></div><div>Build a robot</div>"
         scripts.on(NotesScripts.raw) { _, index in
             index == 0
                 ? NFx.raw(id: "n3", title: "Project Ideas", text: "Project Ideas\nBuild a robot", html: originalHTML)
-                : NFx.raw(id: "n3", title: "Project Ideas", text: "", html: "")   // Notes lost the content!
+                : NFx.raw(id: "n3", title: "Project Ideas", text: "", html: "")  // Notes lost the content!
         }
         scripts.on(NotesScripts.setBody, returns: "n3")
         do {
@@ -277,8 +342,11 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testNotesWithAttachmentsAreNeverRewritten() async throws {
-        installFolders(); installNotes()
-        scripts.on(NotesScripts.raw, returns: NFx.raw(id: "n3", title: "Photos", text: "Photos", html: "<div>Photos</div>", attachments: 2))
+        installFolders()
+        installNotes()
+        scripts.on(
+            NotesScripts.raw,
+            returns: NFx.raw(id: "n3", title: "Photos", text: "Photos", html: "<div>Photos</div>", attachments: 2))
         do {
             _ = try await registry().run(.notesAppend, ["id": "n3", "text": "More"])
             XCTFail("should have thrown")
@@ -289,7 +357,8 @@ final class NotesIntegrationTests: XCTestCase {
     }
 
     func testLockedNotesAreNeverEdited() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.raw, returns: NFx.raw(id: "n6", title: "Secret", text: "", html: "", locked: true))
         do {
             _ = try await registry().run(.notesAppend, ["id": "n6", "text": "More"])
@@ -303,20 +372,29 @@ final class NotesIntegrationTests: XCTestCase {
     // MARK: Update
 
     func testReplacingContentKeepsTheTitleLine() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.raw) { _, index in
             index == 0
-                ? NFx.raw(id: "n2", title: "Shopping list", text: "Shopping list\nold", html: "<div><h1>Shopping list</h1></div><div>old</div>")
+                ? NFx.raw(
+                    id: "n2", title: "Shopping list", text: "Shopping list\nold",
+                    html: "<div><h1>Shopping list</h1></div><div>old</div>")
                 : NFx.raw(id: "n2", title: "Shopping list", text: "Shopping list\nmilk, eggs", html: "")
         }
         scripts.on(NotesScripts.setBody, returns: "n2")
         let outcome = try await registry().run(.notesUpdate, ["id": "n2", "new_content": "milk, eggs"])
         XCTAssertNotNil(outcome.output)
-        XCTAssertEqual(scripts.calls(to: NotesScripts.setBody).first?.arguments, ["n2", "<div><h1>Shopping list</h1></div><div>milk, eggs</div>"])
+        XCTAssertEqual(
+            scripts.calls(to: NotesScripts.setBody).first?.arguments,
+            [
+                "n2", "<div><h1>Shopping list</h1></div><div>milk, eggs</div>",
+                "<div><h1>Shopping list</h1></div><div>old</div>",
+            ])
     }
 
     func testRenameUsesTheRenameScript() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.raw) { _, index in
             index == 0
                 ? NFx.raw(id: "n2", title: "Shopping list", text: "Shopping list\nold", html: "<div>x</div>")
@@ -332,7 +410,8 @@ final class NotesIntegrationTests: XCTestCase {
     // MARK: Delete
 
     func testDeleteAsksFirstAndOnlyThenMovesTheNoteToRecentlyDeleted() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.delete, returns: "true")
 
         let first = try await registry().run(.notesDelete, ["title": "Shopping list"])
@@ -342,13 +421,15 @@ final class NotesIntegrationTests: XCTestCase {
         XCTAssertEqual(confirmation.call.arguments["id"], "n2")
         XCTAssertTrue(scripts.calls(to: NotesScripts.delete).isEmpty, "nothing is deleted before the user confirms")
 
-        let confirmed = try await registry().run(.notesDelete, confirmation.call.arguments, context: executionContext(confirmed: true))
+        let confirmed = try await registry().run(
+            .notesDelete, confirmation.call.arguments, context: executionContext(confirmed: true))
         XCTAssertTrue(try XCTUnwrap(confirmed.output).verification.isVerified)
         XCTAssertEqual(scripts.calls(to: NotesScripts.delete).first?.arguments, ["n2", "f-icloud-notes"])
     }
 
     func testDeleteThatLeavesTheNoteBehindIsAnError() async throws {
-        installFolders(); installNotes()
+        installFolders()
+        installNotes()
         scripts.on(NotesScripts.delete, returns: "false")
         do {
             _ = try await registry().run(.notesDelete, ["id": "n2"], context: executionContext(confirmed: true))
@@ -374,7 +455,9 @@ final class NotesIntegrationTests: XCTestCase {
         let registry = registry()
         for descriptor in registry.descriptors {
             for example in descriptor.examples {
-                XCTAssertNoThrow(try registry.validate(ToolCall(tool: descriptor.name, arguments: example.arguments)), "\(descriptor.name): \(example.phrase)")
+                XCTAssertNoThrow(
+                    try registry.validate(ToolCall(tool: descriptor.name, arguments: example.arguments)),
+                    "\(descriptor.name): \(example.phrase)")
             }
         }
     }

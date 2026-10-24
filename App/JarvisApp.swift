@@ -9,12 +9,17 @@ struct JarvisApp: App {
     @State private var shell: AppShell
 
     init() {
-        let model = AppModel(environment: AppEnvironment())
-        let shell = AppShell()
+        #if DEBUG
+            let preview = DebugSnapshots.makeModelsIfRequested()
+        #else
+            let preview: (AppModel, AppShell)? = nil
+        #endif
+        let model = preview?.0 ?? AppModel(environment: AppEnvironment())
+        let shell = preview?.1 ?? AppShell()
         _model = State(initialValue: model)
         _shell = State(initialValue: shell)
         AppDelegate.model = model
-        shell.start { model.toggleMainWindow() }
+        if preview == nil { shell.start { model.toggleMainWindow() } }
     }
 
     var body: some Scene {
@@ -49,10 +54,10 @@ struct JarvisApp: App {
         }
 
         #if DEBUG
-        Window("Menu bar preview", id: "menubar-preview") {
-            MenuBarContent().environment(model).environment(shell)
-        }
-        .defaultSize(width: 440, height: 520)
+            Window("Menu bar preview", id: "menubar-preview") {
+                MenuBarContent().environment(model).environment(shell)
+            }
+            .defaultSize(width: 440, height: 520)
         #endif
 
         MenuBarExtra(isInserted: Binding(get: { shell.showMenuBarIcon }, set: { shell.setShowMenuBarIcon($0) })) {

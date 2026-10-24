@@ -30,7 +30,9 @@ struct ReminderListInfo: Sendable, Hashable {
     var isDefault: Bool
 
     var json: JSONValue {
-        .object(["id": .string(id), "name": .string(title), "account": .string(sourceName), "is_default": .bool(isDefault)])
+        .object([
+            "id": .string(id), "name": .string(title), "account": .string(sourceName), "is_default": .bool(isDefault),
+        ])
     }
 }
 
@@ -56,6 +58,7 @@ struct ReminderInfo: Sendable, Hashable {
     var hasAlarm: Bool
     var creationDate: Date?
     var recurrence: String? = nil
+    var recurrenceDetails: RecurrenceSpecification? = nil
 
     /// Reminders' own priority scale: 1–4 high, 5 medium, 6–9 low, 0 none.
     var priorityName: String {
@@ -72,13 +75,19 @@ struct ReminderInfo: Sendable, Hashable {
             "id": .string(id), "title": .string(title), "list": .string(listTitle), "list_id": .string(listID),
             "account": .string(sourceName), "completed": .bool(isCompleted), "priority": .string(priorityName),
             "has_alarm": .bool(hasAlarm), "recurrence": recurrence.map(JSONValue.string) ?? .null,
+            "recurrence_details": recurrenceDetails?.json(zone: calendar.timeZone) ?? .null,
         ]
         if let notes, !notes.isEmpty { object["notes"] = .string(notes) }
         if let due {
-            object["due"] = dueHasTime ? .string(ISODates.string(from: due, timeZone: calendar.timeZone)) : .string(ISODates.dayString(from: due, timeZone: calendar.timeZone))
+            object["due"] =
+                dueHasTime
+                ? .string(ISODates.string(from: due, timeZone: calendar.timeZone))
+                : .string(ISODates.dayString(from: due, timeZone: calendar.timeZone))
             object["due_has_time"] = .bool(dueHasTime)
         }
-        if let completionDate { object["completed_at"] = .string(ISODates.string(from: completionDate, timeZone: calendar.timeZone)) }
+        if let completionDate {
+            object["completed_at"] = .string(ISODates.string(from: completionDate, timeZone: calendar.timeZone))
+        }
         return .object(object)
     }
 }
@@ -90,6 +99,7 @@ struct ReminderDraft: Sendable {
     var listID: String
     var due: DueSpec?
     var priority: Int
+    var recurrenceDetails: RecurrenceSpecification? = nil
 }
 
 struct ReminderChanges: Sendable {
@@ -101,6 +111,7 @@ struct ReminderChanges: Sendable {
     var priority: Int?
     var completed: Bool?
     var recurrence: String?
+    var recurrenceDetails: RecurrenceSpecification? = nil
 }
 
 enum ReminderStatusFilter: String, Sendable { case pending, completed, all }
@@ -155,13 +166,24 @@ struct EventInfo: Sendable, Hashable {
     var isBusy: Bool
     var isDeclined: Bool
     var canModify: Bool
+    var recurrence: RecurrenceSpecification? = nil
+    var alertMinutes: [Int] = []
+    var timeZoneID: String? = nil
 
     func json(calendar: Calendar) -> JSONValue {
         var object: JSONObject = [
-            "id": .string(id), "title": .string(title), "calendar": .string(calendarTitle), "calendar_id": .string(calendarID),
+            "id": .string(id), "title": .string(title), "calendar": .string(calendarTitle),
+            "calendar_id": .string(calendarID),
             "all_day": .bool(isAllDay), "recurring": .bool(isRecurring), "has_attendees": .bool(hasAttendees),
-            "start": isAllDay ? .string(ISODates.dayString(from: start, timeZone: calendar.timeZone)) : .string(ISODates.string(from: start, timeZone: calendar.timeZone)),
-            "end": isAllDay ? .string(ISODates.dayString(from: end, timeZone: calendar.timeZone)) : .string(ISODates.string(from: end, timeZone: calendar.timeZone)),
+            "recurrence": recurrence?.json(zone: calendar.timeZone) ?? .null,
+            "alert_minutes": .array(alertMinutes.map(JSONValue.int)),
+            "timezone": timeZoneID.map(JSONValue.string) ?? .null,
+            "start": isAllDay
+                ? .string(ISODates.dayString(from: start, timeZone: calendar.timeZone))
+                : .string(ISODates.string(from: start, timeZone: calendar.timeZone)),
+            "end": isAllDay
+                ? .string(ISODates.dayString(from: end, timeZone: calendar.timeZone))
+                : .string(ISODates.string(from: end, timeZone: calendar.timeZone)),
         ]
         if let location, !location.isEmpty { object["location"] = .string(location) }
         if let notes, !notes.isEmpty { object["notes"] = .string(notes) }
@@ -182,6 +204,8 @@ struct EventDraft: Sendable {
     var notes: String?
     var calendarID: String
     var alertMinutesBefore: Int?
+    var recurrence: RecurrenceSpecification? = nil
+    var timeZoneID: String? = nil
 }
 
 struct EventChanges: Sendable {
@@ -191,6 +215,10 @@ struct EventChanges: Sendable {
     var location: String?
     var notes: String?
     var calendarID: String?
+    var alertMinutesBefore: Int? = nil
+    var clearAlerts = false
+    var timeZoneID: String? = nil
+    var isAllDay: Bool? = nil
 }
 
 protocol EventStoring: Sendable {
@@ -211,8 +239,10 @@ enum EventKitRequirements {
         id: "reminders",
         title: LocalizedText(en: "Reminders", es: "Recordatorios"),
         rationale: LocalizedText(
-            en: "Jarvis creates, reads and completes reminders using Apple's EventKit. Full access is needed to find existing reminders.",
-            es: "Jarvis crea, lee y completa recordatorios con EventKit de Apple. Se necesita acceso completo para encontrar recordatorios existentes."
+            en:
+                "Jarvis creates, reads and completes reminders using Apple's EventKit. Full access is needed to find existing reminders.",
+            es:
+                "Jarvis crea, lee y completa recordatorios con EventKit de Apple. Se necesita acceso completo para encontrar recordatorios existentes."
         ),
         settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders"
     )
@@ -221,8 +251,10 @@ enum EventKitRequirements {
         id: "calendars",
         title: LocalizedText(en: "Calendars", es: "Calendarios"),
         rationale: LocalizedText(
-            en: "Jarvis reads and edits your events using Apple's EventKit. Full access is needed to move or delete events and to check conflicts.",
-            es: "Jarvis lee y edita tus eventos con EventKit de Apple. Se necesita acceso completo para mover o eliminar eventos y detectar conflictos."
+            en:
+                "Jarvis reads and edits your events using Apple's EventKit. Full access is needed to move or delete events and to check conflicts.",
+            es:
+                "Jarvis lee y edita tus eventos con EventKit de Apple. Se necesita acceso completo para mover o eliminar eventos y detectar conflictos."
         ),
         settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
     )
@@ -231,8 +263,10 @@ enum EventKitRequirements {
         id: "contacts",
         title: LocalizedText(en: "Contacts", es: "Contactos"),
         rationale: LocalizedText(
-            en: "Optional: Jarvis can look up the people you mention (for example “meeting with Daniel”) to add their details to events.",
-            es: "Opcional: Jarvis puede buscar a las personas que mencionas (por ejemplo «reunión con Daniel») para añadir sus datos a los eventos."
+            en:
+                "Optional: Jarvis can look up the people you mention (for example “meeting with Daniel”) to add their details to events.",
+            es:
+                "Opcional: Jarvis puede buscar a las personas que mencionas (por ejemplo «reunión con Daniel») para añadir sus datos a los eventos."
         ),
         settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"
     )

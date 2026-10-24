@@ -11,8 +11,12 @@ public struct HistoryEntry: Codable, Sendable, Hashable, Identifiable {
     public var summary: String
     public var tools: [String]
     public var source: String
+    public var conversation: SavedConversation? = nil
 
-    public init(id: UUID, date: Date, text: String, language: Language, status: EngineResponse.Status, summary: String, tools: [String], source: String) {
+    public init(
+        id: UUID, date: Date, text: String, language: Language, status: EngineResponse.Status, summary: String,
+        tools: [String], source: String
+    ) {
         self.id = id
         self.date = date
         self.text = text
@@ -28,6 +32,30 @@ public protocol HistoryRecording: Sendable {
     func record(_ entry: HistoryEntry) async
     /// Updates an earlier entry once a pending confirmation/clarification is resolved.
     func update(id: UUID, status: EngineResponse.Status, summary: String) async
+    func updateConversation(_ response: EngineResponse) async
+}
+extension HistoryRecording { public func updateConversation(_ response: EngineResponse) async {} }
+
+public struct SavedConversation: Codable, Sendable, Hashable {
+    public struct Step: Codable, Sendable, Hashable {
+        public let tool: String
+        public let status: ToolResult.Status
+        public let message: String
+        public let verification: Verification
+        public let durationMs: Int
+    }
+    public let user: String
+    public let answer: String
+    public let steps: [Step]
+    public init(_ response: EngineResponse) {
+        user = String(response.input.prefix(12000))
+        answer = String(response.message.prefix(12000))
+        steps = response.results.prefix(32).map {
+            Step(
+                tool: $0.tool.rawValue, status: $0.status, message: String($0.message.prefix(1000)),
+                verification: $0.verification, durationMs: $0.durationMs)
+        }
+    }
 }
 
 /// Well-known on-disk locations.
@@ -35,7 +63,8 @@ public enum JarvisPaths {
     public static let folderName = "JarvisAppleIntegrations"
 
     public static func applicationSupportDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let base =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return base.appendingPathComponent(folderName, isDirectory: true)
     }
@@ -56,7 +85,8 @@ public enum JarvisPaths {
     @discardableResult
     public static func ensurePrivateDirectory(_ directory: URL) -> Bool {
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             return true
         } catch {
@@ -104,6 +134,17 @@ public actor HistoryStore: HistoryRecording {
         save()
     }
 
+    public func updateConversation(_ response: EngineResponse) {
+        loadIfNeeded()
+        guard let index = entries.firstIndex(where: { $0.id == response.id && $0.conversation != nil }) else { return }
+        var response = response
+        response.input = entries[index].conversation?.user ?? entries[index].text
+        entries[index].conversation = SavedConversation(response)
+        entries[index].status = response.status
+        entries[index].summary = String(response.message.prefix(Self.maxSummaryLength))
+        save()
+    }
+
     public func delete(ids: Set<UUID>) {
         loadIfNeeded()
         entries.removeAll { ids.contains($0.id) }
@@ -136,6 +177,12 @@ public actor HistoryStore: HistoryRecording {
     }
 
     private func save() {
+        // Keep lightweight history for older commands while bounding optional full conversation storage.
+        var conversations = 0
+        for index in entries.indices where entries[index].conversation != nil {
+            conversations += 1
+            if conversations > 100 { entries[index].conversation = nil }
+        }
         JarvisPaths.ensurePrivateDirectory(fileURL.deletingLastPathComponent())
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

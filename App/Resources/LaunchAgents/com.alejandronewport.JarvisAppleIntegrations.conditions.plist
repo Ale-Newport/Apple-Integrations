@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.alejandronewport.JarvisAppleIntegrations.conditions</string>
+<key>BundleProgram</key><string>Contents/Library/LoginItems/Jarvis Condition Agent.app/Contents/MacOS/Jarvis Condition Agent</string>
+<key>RunAtLoad</key><true/>
+<key>StartInterval</key><integer>900</integer>
+<key>ProcessType</key><string>Background</string>
+<key>LimitLoadToSessionType</key><string>Aqua</string>
+<key>ThrottleInterval</key><integer>60</integer>
+</dict></plist>

@@ -60,7 +60,9 @@ public struct ToolParameter: Sendable, Hashable {
     public let summary: String
     public let defaultValue: JSONValue?
 
-    public init(name: String, kind: ParameterKind, required: Bool = false, summary: String, defaultValue: JSONValue? = nil) {
+    public init(
+        name: String, kind: ParameterKind, required: Bool = false, summary: String, defaultValue: JSONValue? = nil
+    ) {
         self.name = name
         self.kind = kind
         self.required = required
@@ -70,20 +72,35 @@ public struct ToolParameter: Sendable, Hashable {
 
     // Terse factories used by the integrations' tool tables.
 
-    public static func string(_ name: String, _ summary: String, required: Bool = false, maxLength: Int = 2_000) -> ToolParameter {
+    public static func string(_ name: String, _ summary: String, required: Bool = false, maxLength: Int = 2_000)
+        -> ToolParameter
+    {
         ToolParameter(name: name, kind: .string(maxLength: maxLength), required: required, summary: summary)
     }
 
-    public static func integer(_ name: String, _ summary: String, required: Bool = false, min: Int? = nil, max: Int? = nil, default value: Int? = nil) -> ToolParameter {
-        ToolParameter(name: name, kind: .integer(min: min, max: max), required: required, summary: summary, defaultValue: value.map(JSONValue.int))
+    public static func integer(
+        _ name: String, _ summary: String, required: Bool = false, min: Int? = nil, max: Int? = nil,
+        default value: Int? = nil
+    ) -> ToolParameter {
+        ToolParameter(
+            name: name, kind: .integer(min: min, max: max), required: required, summary: summary,
+            defaultValue: value.map(JSONValue.int))
     }
 
-    public static func number(_ name: String, _ summary: String, required: Bool = false, min: Double? = nil, max: Double? = nil) -> ToolParameter {
-        ToolParameter(name: name, kind: .number(min: min, max: max), required: required, summary: summary)
+    public static func number(
+        _ name: String, _ summary: String, required: Bool = false, min: Double? = nil, max: Double? = nil,
+        default value: Double? = nil
+    ) -> ToolParameter {
+        ToolParameter(
+            name: name, kind: .number(min: min, max: max), required: required, summary: summary,
+            defaultValue: value.map(JSONValue.double))
     }
 
-    public static func boolean(_ name: String, _ summary: String, required: Bool = false, default value: Bool? = nil) -> ToolParameter {
-        ToolParameter(name: name, kind: .boolean, required: required, summary: summary, defaultValue: value.map(JSONValue.bool))
+    public static func boolean(_ name: String, _ summary: String, required: Bool = false, default value: Bool? = nil)
+        -> ToolParameter
+    {
+        ToolParameter(
+            name: name, kind: .boolean, required: required, summary: summary, defaultValue: value.map(JSONValue.bool))
     }
 
     public static func dateTime(_ name: String, _ summary: String, required: Bool = false) -> ToolParameter {
@@ -102,12 +119,20 @@ public struct ToolParameter: Sendable, Hashable {
         ToolParameter(name: name, kind: .time, required: required, summary: summary)
     }
 
-    public static func choice(_ name: String, _ values: [String], _ summary: String, required: Bool = false, default value: String? = nil) -> ToolParameter {
-        ToolParameter(name: name, kind: .enumeration(values), required: required, summary: summary, defaultValue: value.map(JSONValue.string))
+    public static func choice(
+        _ name: String, _ values: [String], _ summary: String, required: Bool = false, default value: String? = nil
+    ) -> ToolParameter {
+        ToolParameter(
+            name: name, kind: .enumeration(values), required: required, summary: summary,
+            defaultValue: value.map(JSONValue.string))
     }
 
-    public static func strings(_ name: String, _ summary: String, required: Bool = false, maxItems: Int = 20, maxLength: Int = 200) -> ToolParameter {
-        ToolParameter(name: name, kind: .stringList(maxItems: maxItems, maxLength: maxLength), required: required, summary: summary)
+    public static func strings(
+        _ name: String, _ summary: String, required: Bool = false, maxItems: Int = 20, maxLength: Int = 200
+    ) -> ToolParameter {
+        ToolParameter(
+            name: name, kind: .stringList(maxItems: maxItems, maxLength: maxLength), required: required,
+            summary: summary)
     }
 }
 
@@ -157,6 +182,7 @@ public struct ToolDescriptor: Sendable, Hashable {
     /// duplicate data. The engine suppresses an identical call seen within the duplicate window.
     public let deduplicate: Bool
     public let examples: [ToolExample]
+    public let requiresConfirmation: Bool
 
     public init(
         name: ToolName,
@@ -169,7 +195,8 @@ public struct ToolDescriptor: Sendable, Hashable {
         availability: ToolAvailability = .supported,
         timeout: TimeInterval = 30,
         deduplicate: Bool = false,
-        examples: [ToolExample] = []
+        examples: [ToolExample] = [],
+        requiresConfirmation: Bool = false
     ) {
         self.name = name
         self.integration = integration
@@ -182,6 +209,7 @@ public struct ToolDescriptor: Sendable, Hashable {
         self.timeout = timeout
         self.deduplicate = deduplicate
         self.examples = examples
+        self.requiresConfirmation = requiresConfirmation
     }
 
     public func parameter(named name: String) -> ToolParameter? { parameters.first { $0.name == name } }
@@ -195,26 +223,42 @@ public struct ToolDescriptor: Sendable, Hashable {
     public var isMutating: Bool { safety != .readOnly }
 }
 
-public extension ToolParameter {
+extension ToolParameter {
     /// Standard JSON Schema, alongside the compact human-readable schema used by older interpreters.
-    var jsonSchema: JSONValue {
+    public var jsonSchema: JSONValue {
         var schema: JSONObject = ["description": .string(summary)]
         switch kind {
-        case .string(let max): schema["type"] = "string"; schema["maxLength"] = .int(max)
+        case .string(let max):
+            schema["type"] = "string"
+            schema["maxLength"] = .int(max)
         case .integer(let min, let max):
             schema["type"] = "integer"
-            if let min { schema["minimum"] = .int(min) }; if let max { schema["maximum"] = .int(max) }
+            if let min { schema["minimum"] = .int(min) }
+            if let max { schema["maximum"] = .int(max) }
         case .number(let min, let max):
             schema["type"] = "number"
-            if let min { schema["minimum"] = .double(min) }; if let max { schema["maximum"] = .double(max) }
+            if let min { schema["minimum"] = .double(min) }
+            if let max { schema["maximum"] = .double(max) }
         case .boolean: schema["type"] = "boolean"
-        case .enumeration(let options): schema["type"] = "string"; schema["enum"] = .array(options.map(JSONValue.string))
+        case .enumeration(let options):
+            schema["type"] = "string"
+            schema["enum"] = .array(options.map(JSONValue.string))
         case .stringList(let maxItems, let maxLength):
-            schema["type"] = "array"; schema["maxItems"] = .int(maxItems); schema["items"] = ["type": "string", "maxLength": .int(maxLength)]
-        case .dateTime: schema["type"] = "string"; schema["format"] = "date-time"
-        case .date: schema["type"] = "string"; schema["format"] = "date"
-        case .dateOrDateTime: schema["type"] = "string"; schema["anyOf"] = [["format": "date"], ["format": "date-time"]]
-        case .time: schema["type"] = "string"; schema["pattern"] = #"^([01][0-9]|2[0-3]):[0-5][0-9]$"#
+            schema["type"] = "array"
+            schema["maxItems"] = .int(maxItems)
+            schema["items"] = ["type": "string", "maxLength": .int(maxLength)]
+        case .dateTime:
+            schema["type"] = "string"
+            schema["format"] = "date-time"
+        case .date:
+            schema["type"] = "string"
+            schema["format"] = "date"
+        case .dateOrDateTime:
+            schema["type"] = "string"
+            schema["anyOf"] = [["format": "date"], ["format": "date-time"]]
+        case .time:
+            schema["type"] = "string"
+            schema["pattern"] = #"^([01][0-9]|2[0-3]):[0-5][0-9]$"#
         }
         if let defaultValue { schema["default"] = defaultValue }
         return .object(schema)

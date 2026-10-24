@@ -31,6 +31,7 @@ struct ChatMessage: Identifiable, Equatable {
     var resolvedTokens: Set<String> = []
     /// `false` for follow-up answers ("Confirmed") that continue an earlier message and have no user bubble.
     var showsUserBubble = true
+    var partialReply = ""
 
     var response: EngineResponse? {
         if case .finished(let response) = phase { return response }

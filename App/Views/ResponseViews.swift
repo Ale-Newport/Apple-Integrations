@@ -97,7 +97,10 @@ struct MessageRow: View {
                         .textSelection(.enabled)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color(red: 0.16, green: 0.30, blue: 0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(
+                            Color(red: 0.16, green: 0.30, blue: 0.82),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
                         .foregroundStyle(.white)
                         .contextMenu {
                             Button(model.t("Copy", "Copiar")) {
@@ -128,11 +131,14 @@ struct ResponseCard: View {
         switch message.phase {
         case .interpreting:
             card(tone: .neutral) {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(model.t("Working on it…", "Trabajando en ello…")).foregroundStyle(.secondary)
-                    Spacer(minLength: 12)
-                    stopButton
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(model.t("Working on it…", "Trabajando en ello…")).foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        stopButton
+                    }
+                    if !message.partialReply.isEmpty { Text(message.partialReply).textSelection(.enabled) }
                 }
             }
         case .running(let steps):
@@ -142,6 +148,9 @@ struct ResponseCard: View {
                         Text(model.t("Executing", "Ejecutando")).font(.headline)
                         Spacer()
                         stopButton
+                    }
+                    if !message.partialReply.isEmpty {
+                        Text(message.partialReply).textSelection(.enabled).padding(.vertical, 6)
                     }
                     ForEach(steps) { step in
                         HStack(spacing: 8) {
@@ -193,7 +202,9 @@ struct ResponseCardChrome<Content: View>: View {
             .frame(maxWidth: 560, alignment: .leading)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2).fill(tone.color.opacity(tone == .neutral ? 0.25 : 0.9)).frame(width: 3).padding(.vertical, 8).padding(.leading, 2)
+                RoundedRectangle(cornerRadius: 2).fill(tone.color.opacity(tone == .neutral ? 0.25 : 0.9)).frame(
+                    width: 3
+                ).padding(.vertical, 8).padding(.leading, 2)
             }
     }
 }
@@ -252,7 +263,9 @@ struct FinishedResponse: View {
         let permissionIssue = response.results.compactMap(\.permission).first
         if let permission = permissionIssue {
             HStack {
-                Button(model.t("Open Privacy Settings", "Abrir ajustes de privacidad")) { model.openSystemSettings(permission.settingsURL) }
+                Button(model.t("Open Privacy Settings", "Abrir ajustes de privacidad")) {
+                    model.openSystemSettings(permission.settingsURL)
+                }
                 Button(model.t("Try again", "Reintentar")) { model.retry(message) }
             }
             .buttonStyle(.bordered)
@@ -308,22 +321,28 @@ struct ResultExtras: View {
             ForEach(result.warnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             }
-            if let confirmation = result.confirmation, let token = confirmation.token, !message.resolvedTokens.contains(token) {
+            if let confirmation = result.confirmation, let token = confirmation.token,
+                !message.resolvedTokens.contains(token)
+            {
                 HStack {
                     Button(role: confirmation.destructive ? .destructive : nil) {
-                        model.resolve(in: message, token: token, decision: .confirm, label: model.t("Confirm", "Confirmar"))
+                        model.resolve(
+                            in: message, token: token, decision: .confirm, label: model.t("Confirm", "Confirmar"))
                     } label: {
                         Text(confirmation.destructive ? model.t("Delete", "Eliminar") : model.t("Confirm", "Confirmar"))
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(confirmation.destructive ? .red : .accentColor)
                     Button(model.t("Cancel", "Cancelar")) {
-                        model.resolve(in: message, token: token, decision: .cancel, label: model.t("Cancel", "Cancelar"))
+                        model.resolve(
+                            in: message, token: token, decision: .cancel, label: model.t("Cancel", "Cancelar"))
                     }
                     .keyboardShortcut(.cancelAction)
                 }
             }
-            if let clarification = result.clarification, let token = clarification.token, !message.resolvedTokens.contains(token) {
+            if let clarification = result.clarification, let token = clarification.token,
+                !message.resolvedTokens.contains(token)
+            {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(clarification.options.enumerated()), id: \.offset) { index, option in
                         Button {
@@ -340,7 +359,8 @@ struct ResultExtras: View {
                         .buttonStyle(.bordered)
                     }
                     Button(model.t("None of these", "Ninguna")) {
-                        model.resolve(in: message, token: token, decision: .cancel, label: model.t("None of these", "Ninguna"))
+                        model.resolve(
+                            in: message, token: token, decision: .cancel, label: model.t("None of these", "Ninguna"))
                     }
                     .buttonStyle(.borderless)
                 }
@@ -365,9 +385,13 @@ struct ResultExtras: View {
     private var verification: some View {
         switch result.verification {
         case .verified(let detail):
-            Label(model.t("Verified", "Verificado"), systemImage: "checkmark.seal.fill").font(.caption).foregroundStyle(.green).help(detail)
+            Label(model.t("Verified", "Verificado"), systemImage: "checkmark.seal.fill").font(.caption).foregroundStyle(
+                .green
+            ).help(detail)
         case .unverified(let reason):
-            Label(model.t("Done, not verified", "Hecho, sin verificar"), systemImage: "exclamationmark.shield").font(.caption).foregroundStyle(.orange).help(reason)
+            Label(model.t("Done, not verified", "Hecho, sin verificar"), systemImage: "exclamationmark.shield").font(
+                .caption
+            ).foregroundStyle(.orange).help(reason)
         case .notApplicable:
             EmptyView()
         }

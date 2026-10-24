@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import JarvisCore
 
 final class ActionEngineTests: XCTestCase {
@@ -8,13 +9,19 @@ final class ActionEngineTests: XCTestCase {
 
     private func standardTools(integration: IntegrationID = "mock") -> [ToolDescriptor] {
         [
-            Fixtures.tool(create, integration: integration, parameters: [.string("title", "Title", required: true)], deduplicate: true),
-            Fixtures.tool(remove, integration: integration, safety: .destructive, parameters: [.string("id", "Id", required: true)]),
+            Fixtures.tool(
+                create, integration: integration, parameters: [.string("title", "Title", required: true)],
+                deduplicate: true),
+            Fixtures.tool(
+                remove, integration: integration, safety: .destructive,
+                parameters: [.string("id", "Id", required: true)]),
             Fixtures.tool(read, integration: integration, safety: .readOnly),
         ]
     }
 
-    private func request(_ text: String = "go", session: String = "s1", language: Language? = nil, allowDuplicate: Bool = false) -> CommandRequest {
+    private func request(
+        _ text: String = "go", session: String = "s1", language: Language? = nil, allowDuplicate: Bool = false
+    ) -> CommandRequest {
         CommandRequest(text: text, language: language, source: .test, session: session, allowDuplicate: allowDuplicate)
     }
 
@@ -22,9 +29,14 @@ final class ActionEngineTests: XCTestCase {
 
     func testSuccessfulCallReturnsVerifiedStructuredResult() async {
         let integration = MockIntegration(id: "mock", tools: standardTools()) { _, _ in
-            .done(ToolOutput(message: "Reminder created", data: ["title": "Buy milk"], verification: .verified("re-read from store")))
+            .done(
+                ToolOutput(
+                    message: "Reminder created", data: ["title": "Buy milk"],
+                    verification: .verified("re-read from store")))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "Buy milk"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "Buy milk"])]))
         let response = await engine.process(request())
 
         XCTAssertEqual(response.status, .completed)
@@ -42,7 +54,9 @@ final class ActionEngineTests: XCTestCase {
         let integration = MockIntegration(id: "mock", tools: standardTools()) { _, _ in
             .done(ToolOutput(message: "Done", verification: .unverified("could not read back")))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.results[0].verification, .unverified("could not read back"))
         XCTAssertFalse(response.results[0].verification.isVerified)
@@ -50,7 +64,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testInvalidArgumentsNeverReachTheIntegration() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["oops": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["oops": "x"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .failed)
         XCTAssertTrue(integration.calls.isEmpty)
@@ -59,7 +75,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testUnknownToolIsRejected() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: "shell.exec", arguments: ["command": "rm -rf /"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: "shell.exec", arguments: ["command": "rm -rf /"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .failed)
         XCTAssertEqual(response.results[0].errorCode, "unknown_tool")
@@ -68,9 +86,12 @@ final class ActionEngineTests: XCTestCase {
 
     func testIntegrationErrorsBecomeFailedResultsInTheUsersLanguage() async {
         let integration = MockIntegration(id: "mock", tools: standardTools()) { _, _ in
-            throw JarvisError.notFound("list_not_found", en: "No list called Shopping.", es: "No existe una lista llamada Shopping.")
+            throw JarvisError.notFound(
+                "list_not_found", en: "No list called Shopping.", es: "No existe una lista llamada Shopping.")
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
 
         let english = await engine.process(request(language: .en))
         XCTAssertEqual(english.status, .failed)
@@ -84,19 +105,23 @@ final class ActionEngineTests: XCTestCase {
     func testUnexpectedErrorsAreReportedWithoutCrashing() async {
         struct Boom: Error {}
         let integration = MockIntegration(id: "mock", tools: standardTools()) { _, _ in throw Boom() }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .failed)
         XCTAssertEqual(response.results[0].errorCode, "internal_error")
     }
 
     func testUnsupportedToolsAreNotExecutedAndExplainThemselves() async {
-        let tool = Fixtures.tool("mock.delete_alarm", availability: .unsupported(
-            reason: LocalizedText(en: "Clock cannot delete alarms.", es: "Reloj no puede eliminar alarmas."),
-            alternative: LocalizedText(en: "Turn it off instead.", es: "Apágala en su lugar.")
-        ))
+        let tool = Fixtures.tool(
+            "mock.delete_alarm",
+            availability: .unsupported(
+                reason: LocalizedText(en: "Clock cannot delete alarms.", es: "Reloj no puede eliminar alarmas."),
+                alternative: LocalizedText(en: "Turn it off instead.", es: "Apágala en su lugar.")
+            ))
         let integration = MockIntegration(id: "mock", tools: [tool])
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: "mock.delete_alarm")]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: "mock.delete_alarm")]))
         let response = await engine.process(request(language: .en))
         XCTAssertEqual(response.status, .unsupported)
         XCTAssertEqual(response.message, "Clock cannot delete alarms. Turn it off instead.")
@@ -106,8 +131,11 @@ final class ActionEngineTests: XCTestCase {
     // MARK: Permissions
 
     func testDeniedPermissionStopsExecutionAndReportsHowToFixIt() async {
-        let integration = MockIntegration(id: "mock", tools: standardTools(), authorization: .denied(Fixtures.requirement))
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let integration = MockIntegration(
+            id: "mock", tools: standardTools(), authorization: .denied(Fixtures.requirement))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .permissionRequired)
         XCTAssertEqual(response.results[0].permission?.id, "mock.permission")
@@ -117,9 +145,12 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testUndeterminedPermissionIsRequestedThenExecutionContinues() async {
-        let integration = MockIntegration(id: "mock", tools: standardTools(), authorization: .notDetermined(Fixtures.requirement))
+        let integration = MockIntegration(
+            id: "mock", tools: standardTools(), authorization: .notDetermined(Fixtures.requirement))
         integration.stateAfterRequest = .authorized
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .completed)
         XCTAssertEqual(integration.requestCount, 1)
@@ -127,17 +158,23 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testUserDecliningThePromptReportsPermissionRequired() async {
-        let integration = MockIntegration(id: "mock", tools: standardTools(), authorization: .notDetermined(Fixtures.requirement))
+        let integration = MockIntegration(
+            id: "mock", tools: standardTools(), authorization: .notDetermined(Fixtures.requirement))
         integration.stateAfterRequest = .denied(Fixtures.requirement)
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .permissionRequired)
         XCTAssertTrue(integration.calls.isEmpty)
     }
 
     func testUnavailableAppIsReportedClearly() async {
-        let integration = MockIntegration(id: "mock", tools: standardTools(), authorization: .unavailable(LocalizedText(en: "Music is not installed.", es: "Música no está instalada.")))
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let integration = MockIntegration(
+            id: "mock", tools: standardTools(),
+            authorization: .unavailable(LocalizedText(en: "Music is not installed.", es: "Música no está instalada.")))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         let response = await engine.process(request(language: .es))
         XCTAssertEqual(response.status, .unavailable)
         XCTAssertEqual(response.message, "Música no está instalada.")
@@ -159,7 +196,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testDestructiveCallsAskBeforeDoingAnything() async {
         let integration = deletingIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .needsConfirmation)
         let confirmation = try? XCTUnwrap(response.results[0].confirmation)
@@ -172,7 +211,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testConfirmingRunsTheCallOnce() async throws {
         let integration = deletingIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
         let first = await engine.process(request())
         let token = try XCTUnwrap(first.results[0].confirmation?.token)
 
@@ -188,7 +229,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testCancellingChangesNothing() async throws {
         let integration = deletingIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]))
         let first = await engine.process(request())
         let token = try XCTUnwrap(first.results[0].confirmation?.token)
         let cancelled = await engine.resolve(token: token, decision: .cancel)
@@ -202,7 +245,11 @@ final class ActionEngineTests: XCTestCase {
         let integration = deletingIntegration()
         let interpreter = StubInterpreter { request in
             switch request.text {
-            case "delete it": return .plan(ToolPlan(steps: [ToolCall(tool: "mock.remove", arguments: ["id": "n1"])], language: request.language, interpreter: "stub"))
+            case "delete it":
+                return .plan(
+                    ToolPlan(
+                        steps: [ToolCall(tool: "mock.remove", arguments: ["id": "n1"])], language: request.language,
+                        interpreter: "stub"))
             default: return .unrecognized(hint: nil)
             }
         }
@@ -224,7 +271,10 @@ final class ActionEngineTests: XCTestCase {
             let integration = deletingIntegration()
             let interpreter = StubInterpreter { request in
                 request.text == "delete it"
-                    ? .plan(ToolPlan(steps: [ToolCall(tool: "mock.remove", arguments: ["id": "n1"])], language: request.language, interpreter: "stub"))
+                    ? .plan(
+                        ToolPlan(
+                            steps: [ToolCall(tool: "mock.remove", arguments: ["id": "n1"])], language: request.language,
+                            interpreter: "stub"))
                     : .unrecognized(hint: nil)
             }
             let engine = Fixtures.engine(integrations: [integration], interpreter: interpreter)
@@ -239,7 +289,9 @@ final class ActionEngineTests: XCTestCase {
         let integration = deletingIntegration()
         var limits = ActionEngine.Limits()
         limits.pendingLifetime = -1
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]), limits: limits)
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]), limits: limits)
         let first = await engine.process(request())
         let token = try XCTUnwrap(first.results[0].confirmation?.token)
         let late = await engine.resolve(token: token, decision: .confirm)
@@ -253,8 +305,12 @@ final class ActionEngineTests: XCTestCase {
         MockIntegration(id: "mock", tools: standardTools()) { call, _ in
             if call.string("title") == "meeting" {
                 let options = [
-                    ClarificationOption(label: "Meeting with Daniel", detail: "Fri 3 PM", call: ToolCall(tool: "mock.create", arguments: ["title": "daniel-meeting"])),
-                    ClarificationOption(label: "Meeting with Maria", detail: "Fri 4 PM", call: ToolCall(tool: "mock.create", arguments: ["title": "maria-meeting"])),
+                    ClarificationOption(
+                        label: "Meeting with Daniel", detail: "Fri 3 PM",
+                        call: ToolCall(tool: "mock.create", arguments: ["title": "daniel-meeting"])),
+                    ClarificationOption(
+                        label: "Meeting with Maria", detail: "Fri 4 PM",
+                        call: ToolCall(tool: "mock.create", arguments: ["title": "maria-meeting"])),
                 ]
                 return .clarify(Clarification(question: "Which meeting?", options: options))
             }
@@ -264,7 +320,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testAmbiguousRequestsAskWhichOne() async throws {
         let integration = ambiguousIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .needsClarification)
         let clarification = try XCTUnwrap(response.results[0].clarification)
@@ -273,11 +331,17 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testChoosingAnOptionByButtonByNumberAndByName() async throws {
-        for (answer, expected) in [("2", "Created maria-meeting"), ("the first one", "Created daniel-meeting"), ("daniel", "Created daniel-meeting"), ("la segunda", "Created maria-meeting")] {
+        for (answer, expected) in [
+            ("2", "Created maria-meeting"), ("the first one", "Created daniel-meeting"),
+            ("daniel", "Created daniel-meeting"), ("la segunda", "Created maria-meeting"),
+        ] {
             let integration = ambiguousIntegration()
             let interpreter = StubInterpreter { request in
                 request.text == "book meeting"
-                    ? .plan(ToolPlan(steps: [ToolCall(tool: "mock.create", arguments: ["title": "meeting"])], language: request.language, interpreter: "stub"))
+                    ? .plan(
+                        ToolPlan(
+                            steps: [ToolCall(tool: "mock.create", arguments: ["title": "meeting"])],
+                            language: request.language, interpreter: "stub"))
                     : .unrecognized(hint: nil)
             }
             let engine = Fixtures.engine(integrations: [integration], interpreter: interpreter)
@@ -289,7 +353,9 @@ final class ActionEngineTests: XCTestCase {
 
         // Button path (token + index)
         let integration = ambiguousIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
         let first = await engine.process(request())
         let token = try XCTUnwrap(first.results[0].clarification?.token)
         let chosen = await engine.resolve(token: token, decision: .choose(1))
@@ -300,7 +366,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testAnOutOfRangeChoiceKeepsWaiting() async throws {
         let integration = ambiguousIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "meeting"])]))
         let first = await engine.process(request())
         let token = try XCTUnwrap(first.results[0].clarification?.token)
         let wrong = await engine.resolve(token: token, decision: .choose(7))
@@ -321,8 +389,13 @@ final class ActionEngineTests: XCTestCase {
             await order.record("end \(call.string("title") ?? "")")
             return .done(ToolOutput(message: "ok", verification: .notApplicable))
         }
-        let music = MockIntegration(id: "music", tools: [Fixtures.tool("music.go", integration: "music", parameters: [.string("title", "t")])], handler: slow)
-        let reminders = MockIntegration(id: "reminders", tools: [Fixtures.tool("reminders.go", integration: "reminders", parameters: [.string("title", "t")])], handler: slow)
+        let music = MockIntegration(
+            id: "music", tools: [Fixtures.tool("music.go", integration: "music", parameters: [.string("title", "t")])],
+            handler: slow)
+        let reminders = MockIntegration(
+            id: "reminders",
+            tools: [Fixtures.tool("reminders.go", integration: "reminders", parameters: [.string("title", "t")])],
+            handler: slow)
         let plan = [
             ToolCall(tool: "music.go", arguments: ["title": "m1"]),
             ToolCall(tool: "music.go", arguments: ["title": "m2"]),
@@ -335,7 +408,8 @@ final class ActionEngineTests: XCTestCase {
         let elapsed = began.duration(to: .now)
 
         XCTAssertEqual(response.status, .completed)
-        XCTAssertEqual(response.results.map(\.tool.rawValue), ["music.go", "music.go", "reminders.go"], "results keep plan order")
+        XCTAssertEqual(
+            response.results.map(\.tool.rawValue), ["music.go", "music.go", "reminders.go"], "results keep plan order")
         // m1 and m2 are sequential (~600 ms); r1 overlaps with them, so the total is far below 900 ms.
         XCTAssertLessThan(elapsed, .milliseconds(850))
         let events = await order.events
@@ -344,11 +418,14 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testAFailureSkipsLaterStepsOfTheSameIntegrationOnly() async {
-        let music = MockIntegration(id: "music", tools: [Fixtures.tool("music.go", integration: "music", parameters: [.string("title", "t")])]) { call, _ in
+        let music = MockIntegration(
+            id: "music", tools: [Fixtures.tool("music.go", integration: "music", parameters: [.string("title", "t")])]
+        ) { call, _ in
             if call.string("title") == "bad" { throw JarvisError.failed("boom", en: "boom", es: "boom") }
             return .done(ToolOutput(message: "ok", verification: .notApplicable))
         }
-        let reminders = MockIntegration(id: "reminders", tools: [Fixtures.tool("reminders.go", integration: "reminders")])
+        let reminders = MockIntegration(
+            id: "reminders", tools: [Fixtures.tool("reminders.go", integration: "reminders")])
         let plan = [
             ToolCall(tool: "music.go", arguments: ["title": "bad"]),
             ToolCall(tool: "music.go", arguments: ["title": "after"]),
@@ -365,7 +442,10 @@ final class ActionEngineTests: XCTestCase {
     func testPlanNotesAreAppendedToTheMessage() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
         let interpreter = StubInterpreter { request in
-            .plan(ToolPlan(steps: [ToolCall(tool: "mock.read")], language: request.language, interpreter: "stub", notes: ["I didn't understand: “blorf”."]))
+            .plan(
+                ToolPlan(
+                    steps: [ToolCall(tool: "mock.read")], language: request.language, interpreter: "stub",
+                    notes: ["I didn't understand: “blorf”."]))
         }
         let engine = Fixtures.engine(integrations: [integration], interpreter: interpreter)
         let response = await engine.process(request())
@@ -374,11 +454,14 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testMixedOutcomesAggregateSensibly() {
-        func result(_ status: ToolResult.Status) -> ToolResult { ToolResult(callID: UUID(), tool: "x", status: status, message: "") }
+        func result(_ status: ToolResult.Status) -> ToolResult {
+            ToolResult(callID: UUID(), tool: "x", status: status, message: "")
+        }
         XCTAssertEqual(ActionEngine.aggregateStatus([result(.completed), result(.completed)]), .completed)
         XCTAssertEqual(ActionEngine.aggregateStatus([result(.completed), result(.failed)]), .partial)
         XCTAssertEqual(ActionEngine.aggregateStatus([result(.failed), result(.failed)]), .failed)
-        XCTAssertEqual(ActionEngine.aggregateStatus([result(.permissionRequired), result(.failed)]), .permissionRequired)
+        XCTAssertEqual(
+            ActionEngine.aggregateStatus([result(.permissionRequired), result(.failed)]), .permissionRequired)
         XCTAssertEqual(ActionEngine.aggregateStatus([result(.needsConfirmation)]), .needsConfirmation)
         XCTAssertEqual(ActionEngine.aggregateStatus([]), .unrecognized)
     }
@@ -387,7 +470,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testIdenticalCreationCallsAreNotRunTwice() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "Buy milk"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "Buy milk"])]))
         let first = await engine.process(request())
         let second = await engine.process(request())
         XCTAssertEqual(first.status, .completed)
@@ -398,7 +483,10 @@ final class ActionEngineTests: XCTestCase {
     func testDifferentArgumentsAreNotDuplicates() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
         let interpreter = StubInterpreter { request in
-            .plan(ToolPlan(steps: [ToolCall(tool: "mock.create", arguments: ["title": .string(request.text)])], language: request.language, interpreter: "stub"))
+            .plan(
+                ToolPlan(
+                    steps: [ToolCall(tool: "mock.create", arguments: ["title": .string(request.text)])],
+                    language: request.language, interpreter: "stub"))
         }
         let engine = Fixtures.engine(integrations: [integration], interpreter: interpreter)
         _ = await engine.process(request("milk"))
@@ -412,7 +500,9 @@ final class ActionEngineTests: XCTestCase {
             if await attempts.next() == 1 { throw JarvisError.failed("flaky", en: "try again", es: "reintenta") }
             return .done(ToolOutput(message: "ok", verification: .notApplicable))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let first = await engine.process(request())
         let second = await engine.process(request())
         XCTAssertEqual(first.status, .failed)
@@ -421,7 +511,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testExplicitRepeatBypassesTheGuard() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         _ = await engine.process(request())
         let again = await engine.process(request(allowDuplicate: true))
         XCTAssertEqual(again.status, .completed)
@@ -433,7 +525,9 @@ final class ActionEngineTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(200))
             return .done(ToolOutput(message: "ok", verification: .notApplicable))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: create, arguments: ["title": "x"])]))
         let first = request()
         let second = request()
         async let a = engine.process(first)
@@ -445,7 +539,8 @@ final class ActionEngineTests: XCTestCase {
 
     func testReadOnlyToolsAreNeverSuppressed() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         _ = await engine.process(request())
         let second = await engine.process(request())
         XCTAssertEqual(second.status, .completed)
@@ -460,7 +555,8 @@ final class ActionEngineTests: XCTestCase {
             try await Task.sleep(for: .seconds(30))
             return .done(ToolOutput(message: "never", verification: .notApplicable))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: "mock.slow")]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: "mock.slow")]))
         let began = ContinuousClock.now
         let response = await engine.process(request())
         XCTAssertEqual(response.status, .failed)
@@ -479,7 +575,8 @@ final class ActionEngineTests: XCTestCase {
             }
             return .done(ToolOutput(message: "never", verification: .notApplicable))
         }
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         let task = Task { await engine.process(CommandRequest(text: "go", source: .test, session: "s")) }
         try? await Task.sleep(for: .milliseconds(100))
         task.cancel()
@@ -492,9 +589,11 @@ final class ActionEngineTests: XCTestCase {
     // MARK: Conversation, language and history
 
     func testRepliesAndUnrecognisedInputNeedNoTools() async {
-        let engine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter { request in
-            request.text == "hi" ? .reply("Hello!") : .unrecognized(hint: "Try “help”.")
-        })
+        let engine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter { request in
+                request.text == "hi" ? .reply("Hello!") : .unrecognized(hint: "Try “help”.")
+            })
         let hello = await engine.process(request("hi"))
         XCTAssertEqual(hello.status, .reply)
         XCTAssertTrue(hello.success)
@@ -506,7 +605,9 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testEmptyAndOversizedInputAreRejected() async {
-        let engine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let engine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         let empty = await engine.process(request("   "))
         XCTAssertEqual(empty.status, .unrecognized)
         let huge = await engine.process(request(String(repeating: "a", count: 25_000)))
@@ -514,9 +615,11 @@ final class ActionEngineTests: XCTestCase {
     }
 
     func testLanguageIsDetectedUnlessTheUserFixesIt() async {
-        let engine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter { request in
-            .reply(request.language.rawValue)
-        })
+        let engine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter { request in
+                .reply(request.language.rawValue)
+            })
         let spanish = await engine.process(request("Recuérdame mañana a las seis llamar a mamá"))
         XCTAssertEqual(spanish.language, .es)
         let english = await engine.process(request("Remind me tomorrow to call Mom"))
@@ -526,7 +629,9 @@ final class ActionEngineTests: XCTestCase {
 
         var settings = JarvisSettings()
         settings.languagePreference = .spanish
-        let fixedEngine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter { .reply($0.language.rawValue) }, settings: settings)
+        let fixedEngine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter { .reply($0.language.rawValue) }, settings: settings)
         let preference = await fixedEngine.process(request("Remind me tomorrow to call Mom"))
         XCTAssertEqual(preference.language, .es)
     }
@@ -554,7 +659,9 @@ final class ActionEngineTests: XCTestCase {
 
     func testHousekeepingReadsCanSkipTheHistory() async throws {
         let recorder = HistoryRecorder()
-        let engine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), history: recorder)
+        let engine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), history: recorder)
         _ = await engine.execute(ToolCall(tool: read), recordHistory: false)
         let silent = await recorder.entries
         XCTAssertTrue(silent.isEmpty)
@@ -566,7 +673,8 @@ final class ActionEngineTests: XCTestCase {
     func testHistoryRecordsCommandsButNotConversationalReplies() async throws {
         let recorder = HistoryRecorder()
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), history: recorder)
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), history: recorder)
         let response = await engine.process(request("show it"))
         let entries = await recorder.entries
         XCTAssertEqual(entries.count, 1)
@@ -581,7 +689,9 @@ final class ActionEngineTests: XCTestCase {
         let recorder = HistoryRecorder()
         var settings = JarvisSettings()
         settings.saveHistory = false
-        let engine = Fixtures.engine(integrations: [MockIntegration(id: "mock", tools: standardTools())], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), settings: settings, history: recorder)
+        let engine = Fixtures.engine(
+            integrations: [MockIntegration(id: "mock", tools: standardTools())],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: read)]), settings: settings, history: recorder)
         _ = await engine.process(request("show it"))
         let entries = await recorder.entries
         XCTAssertTrue(entries.isEmpty)
@@ -590,7 +700,9 @@ final class ActionEngineTests: XCTestCase {
     func testResolvedConfirmationsUpdateTheHistoryEntry() async throws {
         let recorder = HistoryRecorder()
         let integration = deletingIntegration()
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]), history: recorder)
+        let engine = Fixtures.engine(
+            integrations: [integration],
+            interpreter: StubInterpreter(plan: [ToolCall(tool: remove, arguments: ["id": "n1"])]), history: recorder)
         let first = await engine.process(request("delete it"))
         let token = try XCTUnwrap(first.results[0].confirmation?.token)
         _ = await engine.resolve(token: token, decision: .confirm)
@@ -602,7 +714,8 @@ final class ActionEngineTests: XCTestCase {
 
     func testDirectToolExecutionSkipsInterpretation() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter { _ in .unrecognized(hint: nil) })
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter { _ in .unrecognized(hint: nil) })
         let response = await engine.execute(ToolCall(tool: create, arguments: ["title": "Direct"]), source: .ipc)
         XCTAssertEqual(response.status, .completed)
         XCTAssertEqual(response.interpreter, "direct")
@@ -611,13 +724,15 @@ final class ActionEngineTests: XCTestCase {
 
     func testProgressEventsArriveInOrder() async {
         let integration = MockIntegration(id: "mock", tools: standardTools())
-        let engine = Fixtures.engine(integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
+        let engine = Fixtures.engine(
+            integrations: [integration], interpreter: StubInterpreter(plan: [ToolCall(tool: read)]))
         let events = EventLog()
         _ = await engine.process(request()) { event in
             switch event {
             case .planned: events.add("planned")
             case .stepStarted: events.add("started")
             case .stepFinished: events.add("finished")
+            case .responseText: break
             }
         }
         XCTAssertEqual(events.all, ["planned", "started", "finished"])
@@ -631,7 +746,10 @@ actor OrderRecorder {
 
 actor Counter {
     private var value = 0
-    func next() -> Int { value += 1; return value }
+    func next() -> Int {
+        value += 1
+        return value
+    }
 }
 
 actor Flag {
@@ -642,6 +760,14 @@ actor Flag {
 final class EventLog: @unchecked Sendable {
     private let lock = NSLock()
     private var events: [String] = []
-    func add(_ event: String) { lock.lock(); events.append(event); lock.unlock() }
-    var all: [String] { lock.lock(); defer { lock.unlock() }; return events }
+    func add(_ event: String) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+    var all: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
 }

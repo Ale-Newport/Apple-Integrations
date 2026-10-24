@@ -23,44 +23,57 @@ public struct ModelURLSessionTransport: ModelHTTPTransport {
     }
 }
 
-private final class NoModelRedirects: NSObject, URLSessionTaskDelegate, Sendable {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+final class NoModelRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
         completionHandler(nil)
     }
 }
 
 public enum ModelProviderError: Error, Sendable, Equatable {
-    case invalidResponse, responseTooLarge, http(Int), emptyResponse
+    case invalidResponse, responseTooLarge
+    case http(Int)
+    case emptyResponse
 }
 
 /// OpenAI-compatible Chat Completions, including Ollama /v1, llama.cpp and hosted services.
 /// Model names are supplied by the user; there is no paid-provider dependency.
 public struct CompatibleModelProvider: LLMTextProvider {
     public let identifier = "compatible"
-    private let configuration: ModelConfiguration
-    private let secret: String?
-    private let transport: any ModelHTTPTransport
+    let configuration: ModelConfiguration
+    let secret: String?
+    let transport: any ModelHTTPTransport
 
-    public init(configuration: ModelConfiguration, secret: String? = nil, transport: any ModelHTTPTransport = ModelURLSessionTransport()) {
-        self.configuration = configuration; self.secret = secret; self.transport = transport
+    public init(
+        configuration: ModelConfiguration, secret: String? = nil,
+        transport: any ModelHTTPTransport = ModelURLSessionTransport()
+    ) {
+        self.configuration = configuration
+        self.secret = secret
+        self.transport = transport
     }
 
-    public func complete(system: String, user: String) async throws -> String {
+    private func request(system: String, user: String, streaming: Bool) throws -> URLRequest {
         var request = URLRequest(url: try configuration.completionURL())
         request.httpMethod = "POST"
         request.timeoutInterval = 45
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let secret, !secret.isEmpty { request.setValue("Bearer " + secret, forHTTPHeaderField: "Authorization") }
-        let body: JSONValue = .object([
-            "model": .string(configuration.model), "stream": false,
+        var fields: JSONObject = [
+            "model": .string(configuration.model), "stream": .bool(streaming), "temperature": 0, "max_tokens": 2048,
             "messages": .array([
                 .object(["role": "system", "content": .string(system)]),
-                .object(["role": "user", "content": .string(user)])
-            ])
-        ])
-        request.httpBody = try JSONEncoder().encode(body)
-        let (data, response) = try await transport.send(request)
+                .object(["role": "user", "content": .string(user)]),
+            ]),
+        ]
+        if configuration.jsonMode { fields["response_format"] = ["type": "json_object"] }
+        request.httpBody = try JSONEncoder().encode(JSONValue.object(fields))
+        return request
+    }
+    public func complete(system: String, user: String) async throws -> String {
+        let (data, response) = try await transport.send(request(system: system, user: user, streaming: false))
         guard (200..<300).contains(response.statusCode) else { throw ModelProviderError.http(response.statusCode) }
         guard data.count <= 1_048_576 else { throw ModelProviderError.responseTooLarge }
         let json = try JSONDecoder().decode(JSONValue.self, from: data)
@@ -69,6 +82,17 @@ public struct CompatibleModelProvider: LLMTextProvider {
         }
         return text
     }
+    public func complete(system: String, user: String, onDelta: @escaping @Sendable (String) -> Void) async throws
+        -> String
+    {
+        if let streaming = transport as? any ModelStreamingTransport {
+            return try await streaming.stream(request(system: system, user: user, streaming: true), onDelta: onDelta)
+        }
+        let result = try await complete(system: system, user: user)
+        onDelta(result)
+        return result
+    }
+
 }
 
 /// Reads configuration per request so settings changes take effect without relaunching the app.
@@ -76,28 +100,42 @@ public struct ConfiguredAgentInterpreter: CommandInterpreting {
     public let identifier = "agent"
     private let secrets: any SecretStoring
     private let transport: any ModelHTTPTransport
-    public init(secrets: any SecretStoring = KeychainSecretStore(), transport: any ModelHTTPTransport = ModelURLSessionTransport()) {
-        self.secrets = secrets; self.transport = transport
+    public init(
+        secrets: any SecretStoring = KeychainSecretStore(),
+        transport: any ModelHTTPTransport = ModelURLSessionTransport()
+    ) {
+        self.secrets = secrets
+        self.transport = transport
     }
 
     public func interpret(_ request: InterpretationRequest) async throws -> Interpretation {
         if request.settings.model.enabled {
             do {
                 let configuration = request.settings.model
-                let provider = CompatibleModelProvider(configuration: configuration,
+                let provider = CompatibleModelProvider(
+                    configuration: configuration,
                     secret: try secrets.secret(for: configuration.credentialAccount), transport: transport)
                 let proposal = try await LLMToolCallInterpreter(provider: provider).propose(request)
-                if let question = proposal.clarifyingQuestion { return .clarification(Clarification(question: question)) }
+                if let question = proposal.clarifyingQuestion {
+                    return .clarification(Clarification(question: question))
+                }
                 if !proposal.calls.isEmpty {
                     let descriptors = Dictionary(uniqueKeysWithValues: request.tools.map { ($0.name.rawValue, $0) })
                     guard proposal.calls.allSatisfy({ descriptors[$0.tool]?.isSupported == true }) else {
-                        return .clarification(Clarification(question: request.language.pick(
-                            "That request needs an unavailable capability. Which supported action should I use?",
-                            "Esa petición necesita una función no disponible. ¿Qué acción compatible quieres usar?")))
+                        return .clarification(
+                            Clarification(
+                                question: request.language.pick(
+                                    "That request needs an unavailable capability. Which supported action should I use?",
+                                    "Esa petición necesita una función no disponible. ¿Qué acción compatible quieres usar?"
+                                )))
                     }
                     // No model-supplied executable code or validation bypass. Validate the entire batch before effects.
-                    let calls = proposal.calls.map { ToolCall(tool: ToolName($0.tool), arguments: $0.arguments, sourceText: request.text) }
-                    for call in calls { _ = try ToolValidator().validate(call, against: descriptors[call.tool.rawValue]!) }
+                    let calls = proposal.calls.map {
+                        ToolCall(tool: ToolName($0.tool), arguments: $0.arguments, sourceText: request.text)
+                    }
+                    for call in calls {
+                        _ = try ToolValidator().validate(call, against: descriptors[call.tool.rawValue]!)
+                    }
                     let writes = calls.filter { descriptors[$0.tool.rawValue]?.isMutating == true }
                     guard writes.isEmpty || calls.count == 1 else {
                         throw ModelProviderError.invalidResponse
@@ -108,15 +146,27 @@ public struct ConfiguredAgentInterpreter: CommandInterpreting {
                 }
                 if let reply = proposal.reply { return .reply(reply) }
                 if !request.observations.isEmpty { throw ModelProviderError.emptyResponse }
-            } catch is CancellationError { throw CancellationError() }
-            catch {
+            } catch is CancellationError { throw CancellationError() } catch {
                 if !request.observations.isEmpty {
-                    return .unrecognized(hint: request.language.pick(
-                        "The model is unavailable or returned an invalid next step. The workflow stopped.",
-                        "El modelo no está disponible o devolvió un paso inválido. El flujo se ha detenido."))
+                    return .unrecognized(
+                        hint: request.language.pick(
+                            "The model is unavailable or returned an invalid next step. The workflow stopped.",
+                            "El modelo no está disponible o devolvió un paso inválido. El flujo se ha detenido."))
                 }
             }
         }
-        return try await DeterministicInterpreter().interpret(request)
+        let fallback = try await DeterministicInterpreter().interpret(request)
+        if request.settings.model.enabled, case .plan(let plan) = fallback, !plan.notes.isEmpty,
+            plan.steps.contains(where: { step in
+                request.tools.first(where: { $0.name == step.tool })?.isMutating != false
+            })
+        {
+            return .unrecognized(
+                hint: request.language.pick(
+                    "The model could not produce a valid plan for the whole request. No partial offline writes were run; retry or simplify the request.",
+                    "El modelo no pudo planificar toda la petición. No se ejecutaron cambios parciales del respaldo; reintenta o simplifica la petición."
+                ))
+        }
+        return fallback
     }
 }

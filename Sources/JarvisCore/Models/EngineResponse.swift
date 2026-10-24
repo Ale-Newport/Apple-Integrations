@@ -11,7 +11,10 @@ public struct CommandRequest: Sendable, Hashable {
     /// Bypasses duplicate suppression (explicit "run again").
     public var allowDuplicate: Bool
 
-    public init(text: String, language: Language? = nil, source: CommandSource = .app, session: String = "default", allowDuplicate: Bool = false) {
+    public init(
+        text: String, language: Language? = nil, source: CommandSource = .app, session: String = "default",
+        allowDuplicate: Bool = false
+    ) {
         self.text = text
         self.language = language
         self.source = source
@@ -116,6 +119,7 @@ public struct EngineResponse: Sendable, Hashable, Codable, Identifiable {
 public enum EngineEvent: Sendable {
     /// The command was understood; these steps will run (in this order).
     case planned(commandID: UUID, steps: [PlannedStep])
+    case responseText(commandID: UUID, text: String)
     case stepStarted(commandID: UUID, callID: UUID)
     case stepFinished(commandID: UUID, result: ToolResult)
 }
